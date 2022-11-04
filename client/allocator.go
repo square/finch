@@ -187,6 +187,7 @@ func allocClient(a AllocateArgs, cg config.ClientGroup, qps, tps limit.Rate, cli
 	runtime, _ := time.ParseDuration(cg.Runtime) // already validated
 
 	c := &Client{
+		ClientNo:   clientNo,
 		Name:       cg.Name(),
 		DB:         db,
 		Statements: statements,

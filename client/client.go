@@ -33,20 +33,24 @@ type Client struct {
 	conn *sql.Conn
 }
 
-func (c *Client) connect(ctx context.Context, err error) bool {
+func (c *Client) connect(ctx context.Context, cerr error) bool {
 	if c.conn != nil {
 		c.conn.Close()
 	}
-	t0 := time.Now()
-	if err != nil {
+
+	// If there's a caller error, report it and (later) report when we reconnect.
+	// Else (if no cerr), caller is just connecting first time, so don't log unless
+	// connecting fails.
+	if cerr != nil {
 		select {
 		case <-ctx.Done():
 			return false // stop running; client is done
 		default:
 		}
-		log.Printf("Client %s connection error: %s", err)
+		log.Printf("Client %s connection error: %s", c.ClientNo, cerr)
 	}
 
+	t0 := time.Now()
 	for i := 0; i < 100; i++ {
 		// Runtime elapsed?
 		select {
@@ -59,16 +63,17 @@ func (c *Client) connect(ctx context.Context, err error) bool {
 		if err == nil {
 			err = c.conn.PingContext(ctx)
 			if err == nil {
-				log.Printf("Client %d reconnected in %s", time.Now().Sub(t0))
+				if cerr != nil {
+					log.Printf("Client %d reconnected in %s", c.ClientNo, time.Now().Sub(t0))
+				}
 				return true // success; keep running
 			}
 		}
 		if i%10 == 0 {
-			log.Printf("Client %d error reconnecting: %s (retrying)", err)
+			log.Printf("Client %d error reconnecting: %s (retrying)", c.ClientNo, err)
 		}
 		time.Sleep(1 * time.Second)
 	}
-
 	log.Printf("Client %d failed to reconnect to MySQL; stopping early", c.ClientNo)
 	return false // cannot reconnect; stop running
 }
@@ -94,6 +99,18 @@ func (c *Client) Prepare() error {
 }
 
 func (c *Client) Run(ctxStage context.Context) {
+	finch.Debug("run %s: %d stmts, runtime %s, iters %d", c.Name, len(c.Statements), c.Runtime, c.Iterations)
+
+	// @todo 1 shared ctxRun for client group
+	var ctxRun context.Context
+	var cancel context.CancelFunc
+	if c.Runtime > 0 {
+		ctxRun, cancel = context.WithDeadline(ctxStage, time.Now().Add(c.Runtime))
+		defer cancel() // this client
+	} else {
+		ctxRun = ctxStage
+	}
+
 	var err error
 	defer func() {
 		if r := recover(); r != nil {
@@ -107,18 +124,14 @@ func (c *Client) Run(ctxStage context.Context) {
 			}
 			c.ps[i].Close()
 		}
+		select {
+		case <-ctxRun.Done():
+			c.DoneChan <- nil // no error, just runtime elapsed
+		default:
+		}
+
 		c.DoneChan <- err
 	}()
-
-	// @todo 1 shared ctxRun for client group
-	var ctxRun context.Context
-	var cancel context.CancelFunc
-	if c.Runtime > 0 {
-		ctxRun, cancel = context.WithDeadline(ctxStage, time.Now().Add(c.Runtime))
-		defer cancel() // this client
-	} else {
-		ctxRun = ctxStage
-	}
 
 	c.connect(ctxRun, nil)
 
@@ -134,8 +147,6 @@ func (c *Client) Run(ctxStage context.Context) {
 			return
 		}
 	}
-
-	finch.Debug("run %s: %d stmts, runtime %s, iters %d", c.Name, len(c.Statements), c.Runtime, c.Iterations)
 
 	c.Stats.Reset() // sets begin=NOW()
 

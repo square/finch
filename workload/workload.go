@@ -270,9 +270,12 @@ func (f *File) statement() (Statement, error) {
 			if err != nil {
 				return Statement{}, fmt.Errorf("invalid rows limit: %s: %s", m[1], err)
 			}
-			offset, err := strconv.ParseUint(m[2], 10, 64)
-			if err != nil {
-				return Statement{}, fmt.Errorf("invalid rows offset: %s: %s", m[2], err)
+			var offset uint64
+			if len(m) == 3 {
+				offset, err = strconv.ParseUint(m[2], 10, 64)
+				if err != nil {
+					return Statement{}, fmt.Errorf("invalid rows offset: %s: %s", m[2], err)
+				}
 			}
 			finch.Debug("write limit: %d rows (offset %d)", max, offset)
 			s.Limit = limit.Or(s.Limit, limit.NewRows(int64(max), int64(offset)))

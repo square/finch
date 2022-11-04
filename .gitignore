@@ -1,0 +1,4 @@
+*.tmp
+*.swp
+bin/finch/finch
+bin/finch/finch-amd64
