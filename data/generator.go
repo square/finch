@@ -70,23 +70,7 @@ func (f factory) Make(name, dataName string, params map[string]string) (Generato
 		}
 		return IntNotNull{Max: max}, nil
 	case "int-range":
-		max := int64(2147483647)
-		r := int64(100)
-		if s, ok := params["max"]; ok {
-			n, err := strconv.ParseInt(s, 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			max = n
-		}
-		if s, ok := params["range"]; ok {
-			n, err := strconv.ParseInt(s, 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			r = n
-		}
-		return NewIntRange(id, max, r), nil
+		return NewIntRange(id, params)
 	case "str-not-null":
 		s, ok := params["len"]
 		if !ok {
@@ -140,4 +124,22 @@ func Make(name, dataName string, params map[string]string) (Generator, error) {
 		return nil, fmt.Errorf("data.Generator %s not registered", name)
 	}
 	return f.Make(name, dataName, params)
+}
+
+// --------------------------------------------------------------------------
+
+func int64From(params map[string]string, key string, n *int64, required bool) error {
+	s, ok := params[key]
+	if !ok {
+		if required {
+			return fmt.Errorf("%d required", key)
+		}
+		return nil
+	}
+	i, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid %s=%s: %s", key, s, err)
+	}
+	*n = i
+	return nil
 }

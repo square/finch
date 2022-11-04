@@ -45,42 +45,61 @@ func (g IntNotNull) Scan(any interface{}) error {
 // --------------------------------------------------------------------------
 
 type IntRange struct {
-	id  Id
-	r   int64
-	max int64
-	v   []int64
+	id     Id
+	size   int64
+	min    int64
+	max    int64
+	v      []int64
+	params map[string]string
 }
 
 var _ Generator = &IntRange{}
 
-func NewIntRange(id Id, max, r int64) *IntRange {
-	return &IntRange{
-		id:  id,
-		r:   r,
-		max: max,
-		v:   []int64{0, 0},
+func NewIntRange(id Id, params map[string]string) (*IntRange, error) {
+	g := &IntRange{
+		id:     id,
+		size:   100,   // 100 values between
+		min:    1,     // 1 and
+		max:    10000, // 100,000 by default
+		v:      []int64{0, 0},
+		params: params,
 	}
+	if err := int64From(params, "size", &g.size, false); err != nil {
+		return nil, err
+	}
+	if err := int64From(params, "min", &g.min, false); err != nil {
+		return nil, err
+	}
+	if err := int64From(params, "max", &g.max, false); err != nil {
+		return nil, err
+	}
+	if g.min >= g.max {
+		return nil, fmt.Errorf("invalid int range: max not greater than min")
+	}
+	if g.size > (g.max - g.min) {
+		return nil, fmt.Errorf("invalid int range: size > max - min")
+	}
+	finch.Debug("%s: %d values between %d and %d", g.id, g.size, g.min, g.max)
+	return g, nil
 }
 
-func (g *IntRange) Id() Id {
-	return g.id
-}
+func (g *IntRange) Id() Id { return g.id }
 
-func (g *IntRange) Scope() string {
-	return finch.SCOPE_STATEMENT
-}
+func (g *IntRange) Scope() string { return finch.SCOPE_STATEMENT }
 
-func (g *IntRange) Format() string {
-	return "%d"
-}
+func (g *IntRange) Format() string { return "%d" }
 
 func (g *IntRange) Copy(clientNo int) Generator {
-	return NewIntRange(g.id.Copy(clientNo), g.max, g.r)
+	gCopy, _ := NewIntRange(g.id.Copy(clientNo), g.params)
+	return gCopy
 }
 
 func (g *IntRange) Values() []interface{} {
-	lower := rand.Int63n(g.max)
-	upper := lower + g.r - 1
+	// MySQL BETWEEN is closed interval [min, max], so if random min (lower)
+	// is 10 and size is 3, then 10+3=13 but that's 4 values: 10, 11, 12, 13.
+	// So we -1 to make BETWEEEN 10 AND 12, which is 3 values.
+	lower := g.min + rand.Int63n(g.max-g.min)
+	upper := lower + g.size - 1
 	if upper > g.max {
 		upper = g.max
 	}
