@@ -32,7 +32,7 @@ func NewInstance(name string, r *stats.Collector) *Instance {
 func (comp *Instance) Stop() {
 }
 
-func (comp *Instance) Boot(cfg config.File) error {
+func (comp *Instance) Boot(ctx context.Context, cfg config.File) error {
 	// Test connection to MySQL
 	dbconn.SetFactory(cfg.MySQL, nil)
 	db, dsnRedacted, err := dbconn.Make()

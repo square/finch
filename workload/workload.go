@@ -311,6 +311,7 @@ func (f *File) statement() (Statement, error) {
 			// @todo check len(m)
 			s.Columns = make([]interface{}, len(m[1:]))
 			for i, colAndType := range m[1:] {
+				// @todo split csv (handle "col1,col2" instead of "col1, col2")
 				g, err := f.column(i, colAndType)
 				if err != nil {
 					return Statement{}, err
@@ -406,11 +407,12 @@ func (f *File) statement() (Statement, error) {
 }
 
 func (f *File) column(colNo int, colAndType string) (data.Generator, error) {
+	colAndType = strings.TrimSpace(strings.TrimSuffix(colAndType, ","))
 	if colAndType == "_" {
 		return data.Noop, nil
 	}
 	p := strings.Split(colAndType, ":") // col:type
-	col := strings.TrimSuffix(p[0], ",")
+	col := p[0]
 	if _, ok := f.trx.Column[col]; ok {
 		return nil, fmt.Errorf("duplicated saved column: %s", col)
 	}

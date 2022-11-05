@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 
 	"github.com/square/finch"
 	"github.com/square/finch/compute"
@@ -30,9 +31,13 @@ func (e Env) Empty() bool {
 	return len(e.Args) == 0 && len(e.Env) == 0
 }
 
+var portRe = regexp.MustCompile(`:\d+$`)
+
 type Server struct {
 	cmdline CommandLine
 	comp    compute.Coordinator
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 func (s *Server) Boot(env Env) error {
@@ -67,29 +72,36 @@ func (s *Server) Boot(env Env) error {
 	// Load config file and validate
 	var cfg config.File
 	var configFile string
-	if s.cmdline.Options.Server != "" {
-		// If --server is specified, then the config file is optional
-		if len(s.cmdline.Args) > 1 {
-			configFile = s.cmdline.Args[1]
-		}
-	} else {
+	if s.cmdline.Options.Server == "" {
 		// Config file required
 		if len(s.cmdline.Args) == 1 {
 			log.Fatal("No config file specified")
 		}
 		configFile = s.cmdline.Args[1]
+	} else {
+		// If --server is specified, then the config file is optional
+		if len(s.cmdline.Args) > 1 {
+			configFile = s.cmdline.Args[1]
+		}
 	}
 	if configFile != "" {
 		cfg, err = config.Load(configFile)
 		if err != nil {
 			return err
 		}
+		// cd dir of config file so relative file paths in config work
+		os.Chdir(filepath.Dir(configFile))
 	}
+
 	// --server override config.compute.server
 	if s.cmdline.Options.Server != "" {
 		cfg.Compute.Server = s.cmdline.Options.Server
 	}
-	os.Chdir(filepath.Dir(configFile))
+	// Append :port to server addr if not set
+	if cfg.Compute.Server != "" && !portRe.MatchString(cfg.Compute.Server) {
+		cfg.Compute.Server = cfg.Compute.Server + config.DEFAULT_BIND
+	}
+
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("Invalid config (%s): %s\n", configFile, err)
 	}
@@ -100,29 +112,27 @@ func (s *Server) Boot(env Env) error {
 		finch.Debug("server mode")
 		s.comp = compute.NewCoordinator(cfg)
 	} else {
+		// @todo: add ":33075" if needed
 		finch.Debug("client mode: %s -> %s", cfg.Compute.Name, cfg.Compute.Server)
 		s.comp = compute.NewRemote(cfg.Compute.Name, cfg.Compute.Server)
 	}
 
-	if err := s.comp.Boot(cfg); err != nil {
-		return err
-	}
+	// Server context that cancels on CTRL-C
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	go func() {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt)
+		<-c
+		log.Println("\nCaught CTRL-C")
+		s.cancel()
+	}()
 
-	return nil
+	return s.comp.Boot(s.ctx, cfg)
 }
 
 func (s *Server) Run() error {
 	if !s.cmdline.Options.Run {
 		return nil
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	go func(cancel context.CancelFunc) {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt)
-		<-c
-		log.Println("\nCaught CTRL-C")
-		cancel()
-	}(cancel)
-	return s.comp.Run(ctx)
+	return s.comp.Run(s.ctx)
 }

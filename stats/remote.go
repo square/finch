@@ -3,6 +3,7 @@
 package stats
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -14,7 +15,7 @@ import (
 // in compute/Remote.Boot.
 type Server struct {
 	server    string // for logging
-	client    proto.Client
+	client    *proto.Client
 	statsChan chan Stats
 }
 
@@ -51,7 +52,7 @@ func (r Server) Report(stats []Stats) {
 func (r Server) report() {
 	// @todo retry sending a few times
 	for s := range r.statsChan {
-		if err := r.client.Send(s, "/stats"); err != nil {
+		if err := r.client.Send(context.Background(), "/stats", s); err != nil {
 			log.Printf("Failed to send stats: %s\n%+v\n", err, s)
 		} else {
 			log.Printf("Sent stats to %s", r.server)

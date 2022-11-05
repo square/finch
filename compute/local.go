@@ -40,7 +40,7 @@ import (
 //	   └──Stage
 //	      └──Client_1
 type Coordinator interface {
-	Boot(config.File) error
+	Boot(context.Context, config.File) error
 	Run(context.Context) error
 	Stop()
 }
@@ -116,7 +116,7 @@ func (c *Local) Stop() {
 	c.httpServer.Close()
 }
 
-func (c *Local) Boot(cfg config.File) error {
+func (c *Local) Boot(ctx context.Context, cfg config.File) error {
 	// Boot stats aggregator first to ensure we can report stats, which is kind of
 	// the whole point of benchmarking. Plus, the "ag" receives stats from all clients
 	// (local and remote).
@@ -133,7 +133,7 @@ func (c *Local) Boot(cfg config.File) error {
 			cfg.Compute.Name,
 			stats.NewCollector(cfg.Stats, "local", c.ag.Chan()),
 		)
-		if err := c.local.Boot(cfg); err != nil {
+		if err := c.local.Boot(ctx, cfg); err != nil {
 			return err
 		}
 	}
@@ -174,12 +174,16 @@ func (c *Local) Boot(cfg config.File) error {
 	// Wait for the required number remotes to boot
 	for nRemotes > 0 {
 		log.Printf("Have %d remotes, need %d...", len(c.remotes), nRemotes)
-		ack := <-c.bootChan
-		if ack.err != nil {
-			return fmt.Errorf("Remote %s error on boot: %s", ack.name, ack.err)
+		select {
+		case ack := <-c.bootChan:
+			if ack.err != nil {
+				return fmt.Errorf("Remote %s error on boot: %s", ack.name, ack.err)
+			}
+			log.Printf("Remote %s booted", ack.name)
+			nRemotes -= 1
+		case <-ctx.Done():
+			return nil
 		}
-		log.Printf("Remote %s booted", ack.name)
-		nRemotes -= 1
 	}
 	log.Println("All instances have booted")
 
@@ -399,6 +403,7 @@ func (c *Local) remoteFile(w http.ResponseWriter, r *http.Request) {
 
 	// Parse file ref 'stage=...&i=...' from URL
 	q := r.URL.Query()
+	finch.Debug("remoteFile params %+v", q)
 	vals, ok := q["stage"]
 	if !ok {
 		http.Error(w, "missing stage param in URL query: ?stage=...", http.StatusBadRequest)
@@ -408,23 +413,24 @@ func (c *Local) remoteFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "stage param has no value, expected stage name", http.StatusBadRequest)
 		return
 	}
-	stage := strings.Replace(vals[0], "\n", "", -1)
-	stage = strings.Replace(name, "\r", "", -1)
+	stage := clean(vals[0])
 
 	vals, ok = q["i"]
 	if !ok {
-		http.Error(w, "missing name param in URL query: ?name=...", http.StatusBadRequest)
+		http.Error(w, "missing i param in URL query: i=N", http.StatusBadRequest)
 		return
 	}
 	if len(vals) == 0 {
-		http.Error(w, "name param has no value, expected instance name", http.StatusBadRequest)
+		http.Error(w, "i param has no value, expected file number", http.StatusBadRequest)
 		return
 	}
-	iStr := strings.Replace(vals[0], "\n", "", -1)
-	iStr = strings.Replace(name, "\r", "", -1)
-	i, err := strconv.Atoi(iStr)
+	i, err := strconv.Atoi(clean(vals[0]))
 	if err != nil {
 		http.Error(w, "i param is not an integer", http.StatusBadRequest)
+		return
+	}
+	if i < 0 {
+		http.Error(w, "i param is negative", http.StatusBadRequest)
 		return
 	}
 
@@ -445,10 +451,6 @@ func (c *Local) remoteFile(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(trx) == 0 {
 		http.Error(w, "stage "+stage+" has no files", http.StatusBadRequest)
-		return
-	}
-	if i < 0 {
-		http.Error(w, "i param is negative", http.StatusBadRequest)
 		return
 	}
 	if i > len(trx)-1 {
@@ -575,12 +577,7 @@ func clientName(w http.ResponseWriter, r *http.Request) (string, bool) {
 		http.Error(w, "name param has no value, expected instance name", http.StatusBadRequest)
 		return "", false
 	}
-
-	// Avoid code scanning alert "Log entries created from user input"
-	name := strings.Replace(vals[0], "\n", "", -1)
-	name = strings.Replace(name, "\r", "", -1)
-
-	return name, true
+	return clean(vals[0]), true
 }
 
 func unknownRemote(w http.ResponseWriter, name string) {
@@ -601,4 +598,10 @@ func method(w http.ResponseWriter, r *http.Request) (get bool, ok bool) {
 		return
 	}
 	return
+}
+
+// clean removes \n\r to avoid code scanning alert "Log entries created from user input".
+func clean(s string) string {
+	c := strings.Replace(s, "\n", "", -1)
+	return strings.Replace(c, "\r", "", -1)
 }

@@ -42,6 +42,7 @@ func (c *Client) connect(ctx context.Context, cerr error) bool {
 	// Else (if no cerr), caller is just connecting first time, so don't log unless
 	// connecting fails.
 	if cerr != nil {
+		// @todo return false if "Error 1054: Unknown column"
 		select {
 		case <-ctx.Done():
 			return false // stop running; client is done
