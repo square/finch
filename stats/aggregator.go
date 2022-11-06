@@ -38,8 +38,11 @@ func (ag *Ag) Chan() chan<- Stats {
 
 func (ag *Ag) Done() {
 	finch.Debug("ag stop")
-	close(ag.stopChan) // stop Run
-	<-ag.doneChan      // wait for last stats to be reported
+	close(ag.stopChan)            // stop Run
+	<-ag.doneChan                 // wait for last stats to be reported
+	for i := range ag.reporters { // wait for reporters
+		ag.reporters[i].Stop()
+	}
 }
 
 func (ag *Ag) Run() {
@@ -52,7 +55,7 @@ func (ag *Ag) Run() {
 	for {
 		select {
 		case s = <-ag.agChan:
-			finch.Debug("recv stats (n %d, i %d): %+v", intervalNo, i, s)
+			finch.Debug("recv stats (interval %d, n %d): %+v", intervalNo, i, s)
 		case <-ag.stopChan:
 			return
 		}
@@ -83,7 +86,7 @@ func (ag *Ag) Run() {
 		}
 
 		// Received all stats in this interval
-		finch.Debug("interval complete")
+		finch.Debug("interval %d complete", intervalNo)
 		ag.report(interval)
 		i = 0
 		intervalNo += 1

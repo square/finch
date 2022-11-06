@@ -4,49 +4,78 @@ package stats
 
 import (
 	"fmt"
+	"os"
+	"text/tabwriter"
+
+	"github.com/dustin/go-humanize"
 )
 
 // Stdout is a Reporter that prints stats to STDOUT. This is the default when
 // config.stats is not set.
 type Stdout struct {
-	p            []float64
-	perCompute   bool
-	disableTotal bool
+	p          []float64
+	perCompute bool
+	w          *tabwriter.Writer
+	header     string
 }
 
-var _ Reporter = Stdout{}
+var _ Reporter = &Stdout{}
 
-func NewStdout(opts map[string]string) (Stdout, error) {
-	_, p, err := ParsePercentiles(opts["percentiles"])
-	if err != nil {
-		return Stdout{}, err
+func NewStdout(opts map[string]string) (*Stdout, error) {
+	if v, ok := opts["percentiles"]; !ok || v == "" {
+		opts["percentiles"] = "95,99,99.9"
 	}
-	r := Stdout{
+	s, p, err := ParsePercentiles(opts["percentiles"])
+	if err != nil {
+		return nil, err
+	}
+	header := "interval\tevents\tseconds\tQPS\tmin\t"
+	for _, ps := range s {
+		header += ps + "\t"
+	}
+	header += "max\truntime\tcompute"
+	r := &Stdout{
 		p:          p,
 		perCompute: opts["per-compute"] == "yes",
+		w:          tabwriter.NewWriter(os.Stdout, 1, 0, 1, ' ', tabwriter.AlignRight|tabwriter.Debug),
+		header:     header,
 	}
 	return r, nil
 }
 
-func (r Stdout) Report(stats []Stats) {
-	// Stats per compute, if enabled
-	if r.perCompute || len(stats) == 1 {
-		for _, s := range stats {
-			fmt.Printf("%3d: %s  %d events in %.1f seconds\n%.1f QPS min=%d max=%d %v\n",
-				s.Interval, s.Compute, s.N, s.Seconds,
-				float64(s.N)/s.Seconds, s.Min, s.Max, s.Percentiles(r.p))
-		}
-	}
-
-	if r.disableTotal || len(stats) == 1 {
+func (r *Stdout) Report(stats []Stats) {
+	if len(stats) == 0 {
 		return
 	}
 
-	total := stats[0]
-	for i := range stats[1:] {
-		total.Combine(stats[i])
+	fmt.Fprintln(r.w, r.header)
+
+	// Stats per compute, if enabled
+	if r.perCompute {
+		for _, s := range stats {
+			r.print(s)
+		}
+	} else {
+		total := stats[0]
+		for i := range stats[1:] {
+			total.Combine(stats[1+i])
+		}
+		if len(stats) > 1 {
+			total.Compute = fmt.Sprintf("(%d combined)", len(stats))
+		}
+		r.print(total)
 	}
-	fmt.Printf("%3d [%d]: %s  %d events in %.1f seconds\n%.1f QPS min=%d max=%d %v\n",
-		total.Interval, total.Runtime, "total", total.N, total.Seconds,
-		float64(total.N)/total.Seconds, total.Min, total.Max, total.Percentiles(r.p))
+	r.w.Flush()
+	fmt.Println()
 }
+
+func (r *Stdout) print(s Stats) {
+	fmt.Fprintf(r.w, "%d\t%d\t%.1f\t%s\t%s\t",
+		s.Interval, s.N, s.Seconds, humanize.Comma(int64(float64(s.N)/s.Seconds)), humanize.Comma(s.Min))
+	for _, p := range s.Percentiles(r.p) {
+		fmt.Fprintf(r.w, "%s\t", humanize.Comma(int64(p)))
+	}
+	fmt.Fprintf(r.w, "%s\t%d\t%s\n", humanize.Comma(s.Max), s.Runtime, s.Compute)
+}
+
+func (r *Stdout) Stop() {}

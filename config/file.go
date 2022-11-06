@@ -411,9 +411,16 @@ func (c *Stats) Validate() error {
 	}
 	if len(c.Report) == 0 {
 		c.Report = map[string]map[string]string{
-			"stdout": {
-				"percentiles": "99,99.9",
-			},
+			"stdout": {}, // defaults in stats/stdout.go
+		}
+	} else {
+		// Prevent "panic: assignment to entry in nil map", so reporters can trust
+		// that their opts arg is a map, not nil
+		for k, v := range c.Report {
+			if v != nil {
+				continue
+			}
+			c.Report[k] = map[string]string{}
 		}
 	}
 	return nil

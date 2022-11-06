@@ -232,23 +232,25 @@ func (c *Local) Run(ctx context.Context) error {
 	}
 
 	// Wait for all remotes to disconnected
-	if c.haveRemotes {
-	WAIT:
-		for {
-			select {
-			case <-ctx.Done():
-				break WAIT
-			default:
-			}
-			c.Lock()
-			connected := len(c.remotes)
-			c.Unlock()
-			if connected == 0 {
-				break WAIT
-			}
-			log.Printf("%d remotes still connected...", connected)
-			time.Sleep(1 * time.Second)
+	if !c.haveRemotes {
+		return nil
+	}
+
+WAIT:
+	for {
+		select {
+		case <-ctx.Done():
+			break WAIT
+		default:
 		}
+		c.Lock()
+		connected := len(c.remotes)
+		c.Unlock()
+		if connected == 0 {
+			break WAIT
+		}
+		log.Printf("%d remotes still connected...", connected)
+		time.Sleep(1 * time.Second)
 	}
 
 	return nil
@@ -265,7 +267,7 @@ func (c *Local) run(ctx context.Context, stageName string) error {
 		c.Unlock()
 	}()
 
-	finch.Debug("run %s (2)", stageName)
+	finch.Debug("run %s", stageName)
 	if c.local != nil {
 		go func() {
 			a := ack{name: "Local"}
@@ -555,9 +557,9 @@ func (c *Local) remoteStats(w http.ResponseWriter, r *http.Request) {
 
 	var s stats.Stats
 	if err := json.Unmarshal(body, &s); err != nil {
-		log.Printf("Invalid status from %s: %s", name, err)
+		log.Printf("Invalid stats from %s: %s", name, err)
 	}
-	c.ag.Chan() <- s
+	c.ag.Chan() <- s // ag debug-prints the stats on recv
 }
 
 // --------------------------------------------------------------------------

@@ -32,7 +32,7 @@ func NewCSV(opts map[string]string) (CSV, error) {
 	if err != nil {
 		return CSV{}, err
 	}
-	log.Println("CSV file: %s", f.Name())
+	log.Printf("CSV file: %s\n", f.Name())
 
 	n, p, err := ParsePercentiles(opts["percentiles"])
 	if err != nil {
@@ -56,7 +56,7 @@ func (r CSV) Report(stats []Stats) {
 	total := stats[0]
 	if len(stats) > 1 {
 		for i := range stats[1:] {
-			total.Combine(stats[i])
+			total.Combine(stats[1+i])
 		}
 	}
 	// interval,runtime,QPS,min,max,P...
@@ -72,3 +72,5 @@ func (r CSV) Report(stats []Stats) {
 	}
 	fmt.Fprintln(r.file)
 }
+
+func (r CSV) Stop() {}

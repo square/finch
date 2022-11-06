@@ -12,6 +12,7 @@ import (
 
 type Reporter interface {
 	Report([]Stats)
+	Stop()
 }
 
 type ReporterFactory interface {
@@ -21,6 +22,7 @@ type ReporterFactory interface {
 func MakeReporters(cfg config.Stats) ([]Reporter, error) {
 	all := []Reporter{}
 	for name, opts := range cfg.Report {
+		finch.Debug("make %s: %+v", name, opts)
 		f, ok := r.factory[name]
 		if !ok {
 			return nil, fmt.Errorf("reporter %s not registered", name)

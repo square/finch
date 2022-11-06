@@ -6,7 +6,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
+	"github.com/square/finch"
 	"github.com/square/finch/proto"
 )
 
@@ -17,6 +19,8 @@ type Server struct {
 	server    string // for logging
 	client    *proto.Client
 	statsChan chan Stats
+	stopChan  chan struct{}
+	doneChan  chan struct{}
 }
 
 var _ Reporter = Server{}
@@ -25,7 +29,10 @@ func NewServer(opts map[string]string) (Server, error) {
 	r := Server{
 		server:    opts["server"], // for logging
 		client:    proto.NewClient(opts["client"], opts["server"]),
-		statsChan: make(chan Stats, 5),
+		statsChan: make(chan Stats, 3),
+
+		stopChan: make(chan struct{}),
+		doneChan: make(chan struct{}),
 	}
 	go r.report()
 	return r, nil
@@ -49,13 +56,28 @@ func (r Server) Report(stats []Stats) {
 	}
 }
 
+func (r Server) Stop() {
+	close(r.stopChan)
+	select {
+	case <-time.After(5 * time.Second):
+		log.Println("Timeout sending last stats")
+	case <-r.doneChan:
+		finch.Debug("remote stats done")
+	}
+}
+
 func (r Server) report() {
-	// @todo retry sending a few times
-	for s := range r.statsChan {
-		if err := r.client.Send(context.Background(), "/stats", s); err != nil {
-			log.Printf("Failed to send stats: %s\n%+v\n", err, s)
-		} else {
-			log.Printf("Sent stats to %s", r.server)
+	defer close(r.doneChan)
+	for {
+		select {
+		case <-r.stopChan:
+			return
+		case s := <-r.statsChan:
+			if err := r.client.Send(context.Background(), "/stats", s); err != nil {
+				log.Printf("Failed to send stats: %s\n%+v\n", err, s)
+				continue
+			}
+			finch.Debug("sent stats to %s", r.server)
 		}
 	}
 }

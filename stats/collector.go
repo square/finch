@@ -78,6 +78,5 @@ func (r *Collector) report() {
 	for _, s := range r.all {
 		total.Combine(s.Snapshot())
 	}
-	finch.Debug("stats (n %d): %+v", r.interval, total)
-	r.agChan <- *total
+	r.agChan <- *total // ag debug-prints the stats on recv
 }
