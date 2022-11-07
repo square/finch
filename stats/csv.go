@@ -34,43 +34,82 @@ func NewCSV(opts map[string]string) (CSV, error) {
 	}
 	log.Printf("CSV file: %s\n", f.Name())
 
-	n, p, err := ParsePercentiles(opts["percentiles"])
+	sP, nP, err := ParsePercentiles(opts["percentiles"])
 	if err != nil {
 		return CSV{}, err
 	}
 
-	fmt.Fprintf(f, "interval,runtime,QPS,min,max")
-	if len(p) > 0 {
-		fmt.Fprintf(f, ","+strings.Join(n, ","))
-	}
+	// @todo ensure at least 1 P enforced somewhere
+
+	fmt.Fprintf(f, Header,
+		strings.Join(sP, ","),                   // P total
+		strings.Join(withPrefix(sP, "r_"), ","), // read
+		strings.Join(withPrefix(sP, "w_"), ","), // write
+		strings.Join(withPrefix(sP, "c_"), ","), // commit
+	)
 	fmt.Fprintln(f)
 
 	r := CSV{
-		p:    p,
 		file: f,
+		p:    nP,
 	}
 	return r, nil
 }
 
 func (r CSV) Report(stats []Stats) {
 	total := stats[0]
+	for i := range stats[1:] {
+		total.Combine(stats[1+i])
+	}
 	if len(stats) > 1 {
-		for i := range stats[1:] {
-			total.Combine(stats[1+i])
-		}
+		total.Compute = fmt.Sprintf("%d combined", len(stats))
 	}
-	// interval,runtime,QPS,min,max,P...
-	fmt.Fprintf(r.file, "%d,%d,%.1f,%d,%d",
+
+	// Fill in the line with values except the P percentile values, which is done below
+	// because there's a variable number of them
+	line := fmt.Sprintf(Fmt,
 		total.Interval,
+		total.Seconds, // duration (of interval)
 		total.Runtime,
-		float64(total.N)/total.Seconds,
-		total.Min,
-		total.Max,
+		0, // clients @todo
+
+		// TOTAL
+		int64(float64(total.N[TOTAL])/total.Seconds), // QPS
+		total.Min[TOTAL],
+		// P
+		total.Max[TOTAL],
+
+		// READ
+		int64(float64(total.N[READ])/total.Seconds),
+		total.Min[READ],
+		// P
+		total.Max[READ],
+
+		// WRITE
+		int64(float64(total.N[WRITE])/total.Seconds),
+		total.Min[WRITE],
+		// P
+		total.Max[WRITE],
+
+		// COMMIT
+		int64(float64(total.N[COMMIT])/total.Seconds), // TPS
+		total.Min[COMMIT],
+		// P
+		total.Max[COMMIT],
+
+		// Compute (hostname)
+		total.Compute,
 	)
-	for _, p := range total.Percentiles(r.p) {
-		fmt.Fprintf(r.file, ",%d", p)
-	}
-	fmt.Fprintln(r.file)
+
+	// Replace P in Fmt with the CSV percentile values
+	line = strings.Replace(line, "P", intsToString(total.Percentiles(TOTAL, r.p), ",", false), 1)
+	line = strings.Replace(line, "P", intsToString(total.Percentiles(READ, r.p), ",", false), 1)
+	line = strings.Replace(line, "P", intsToString(total.Percentiles(WRITE, r.p), ",", false), 1)
+	line = strings.Replace(line, "P", intsToString(total.Percentiles(COMMIT, r.p), ",", false), 1)
+
+	fmt.Fprintln(r.file, line)
 }
 
-func (r CSV) Stop() {}
+func (r CSV) Stop() {
+	r.file.Close()
+}

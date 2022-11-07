@@ -11,25 +11,42 @@ import (
 	"time"
 )
 
+var nEventTypes = 4 // number of event types:
+
+const (
+	READ byte = iota
+	WRITE
+	COMMIT
+	TOTAL
+)
+
 type Stats struct {
 	*sync.Mutex
-	Begin    time.Time // start of interval
-	Buckets  []uint64  // response time (μs) for percentiles
-	Compute  string    // "local" or remote name, set by Collector
-	End      time.Time // end of interval
-	Interval uint      // interval number, monotonically inc, set by Collector
-	Min      int64     // response time (μs)
-	Max      int64     // response time (μs)
-	N        uint64    // number of events (queries)
-	Runtime  uint      // total elapsed time of benchmark, set by Collector
-	Seconds  float64   // of interval
+	Begin    time.Time  // start of interval
+	Buckets  [][]uint64 // response time (μs) for percentiles
+	Compute  string     // "local" or remote name, set by Collector
+	End      time.Time  // end of interval
+	Interval uint       // interval number, monotonically inc, set by Collector
+	Min      []int64    // response time (μs)
+	Max      []int64    // response time (μs)
+	N        []uint64   // number of events (queries)
+	Runtime  uint       // total elapsed time of benchmark, set by Collector
+	Seconds  float64    // of interval
 }
 
 func NewStats() *Stats {
+	// Buckets for each event type
+	buckets := make([][]uint64, nEventTypes)
+	for i := range buckets {
+		buckets[i] = make([]uint64, n_buckets)
+	}
 	return &Stats{
 		Mutex:   &sync.Mutex{},
 		Begin:   time.Now(),
-		Buckets: make([]uint64, n_buckets),
+		Buckets: buckets,
+		Min:     make([]int64, nEventTypes),
+		Max:     make([]int64, nEventTypes),
+		N:       make([]uint64, nEventTypes),
 	}
 }
 
@@ -40,7 +57,8 @@ const factor = 1.0471285480508996   // 4.7% bucket size increments
 const logFactor = 0.046051701859881 // ln(factor)
 
 // Record records the duration of an event in microseconds.
-func (s *Stats) Record(d int64) {
+func (s *Stats) Record(eventType byte, d int64) {
+	// Calculate bucket number
 	bucket := math.Log(float64(d)/base) / logFactor
 	n := uint(bucket) + 1
 	if bucket < 0 {
@@ -49,25 +67,43 @@ func (s *Stats) Record(d int64) {
 	if n > n_buckets-1 {
 		n = n_buckets - 1
 	}
+
 	s.Lock()
-	s.Buckets[n] += 1
-	if d < s.Min || s.N == 0 {
-		s.Min = d
+
+	// Record for event type: READ, WRITE, or COMMIT
+	s.Buckets[eventType][n] += 1
+	if d < s.Min[eventType] || s.N[eventType] == 0 {
+		s.Min[eventType] = d
 	}
-	if d > s.Max {
-		s.Max = d
+	if d > s.Max[eventType] {
+		s.Max[eventType] = d
 	}
-	s.N++
+	s.N[eventType]++
+
+	// Record for TOTAL
+	if eventType != TOTAL {
+		s.Buckets[TOTAL][n] += 1
+		if d < s.Min[TOTAL] || s.N[TOTAL] == 0 {
+			s.Min[TOTAL] = d
+		}
+		if d > s.Max[TOTAL] {
+			s.Max[TOTAL] = d
+		}
+		s.N[TOTAL]++
+	}
+
 	s.Unlock()
 }
 
 func (s *Stats) Reset() {
-	for i := range s.Buckets {
-		s.Buckets[i] = 0
+	for i := 0; i < nEventTypes; i++ {
+		for j := range s.Buckets[i] {
+			s.Buckets[i][j] = 0
+		}
+		s.Min[i] = 0
+		s.Max[i] = 0
+		s.N[i] = 0
 	}
-	s.Min = 0
-	s.Max = 0
-	s.N = 0
 	s.Seconds = 0
 	s.Begin = time.Now()
 }
@@ -76,17 +112,26 @@ func (s *Stats) Reset() {
 func (s *Stats) Snapshot() Stats {
 	End := time.Now()
 	s.Lock()
+	// MUST COPY to combine because Go slices are refs
+	buckets := make([][]uint64, nEventTypes)
+	min := make([]int64, nEventTypes)
+	max := make([]int64, nEventTypes)
+	n := make([]uint64, nEventTypes)
+	for i := 0; i < nEventTypes; i++ {
+		buckets[i] = make([]uint64, n_buckets)
+		copy(buckets[i], s.Buckets[i])
+		min[i] = s.Min[i]
+		max[i] = s.Max[i]
+		n[i] = s.N[i]
+	}
 	snapshot := Stats{
 		Begin:   s.Begin,
 		End:     End,
 		Seconds: End.Sub(s.Begin).Seconds(),
-		N:       s.N,
-		Min:     s.Min,
-		Max:     s.Max,
-		Buckets: make([]uint64, n_buckets), // copy to combine
-	}
-	for i := range s.Buckets {
-		snapshot.Buckets[i] = s.Buckets[i]
+		N:       n,
+		Min:     min,
+		Max:     max,
+		Buckets: buckets,
 	}
 	s.Reset()
 	s.Unlock()
@@ -95,27 +140,29 @@ func (s *Stats) Snapshot() Stats {
 
 // Combine combines reported stats.
 func (s *Stats) Combine(c Stats) {
-	if c.Begin.Before(s.Begin) || s.N == 0 {
-		s.Begin = c.Begin
-		s.Seconds = s.End.Sub(s.Begin).Seconds()
+	for i := 0; i < nEventTypes; i++ {
+		if c.Begin.Before(s.Begin) || s.N[i] == 0 {
+			s.Begin = c.Begin
+			s.Seconds = s.End.Sub(s.Begin).Seconds()
+		}
+		if c.End.After(s.End) || s.N[i] == 0 {
+			s.End = c.End
+			s.Seconds = s.End.Sub(s.Begin).Seconds()
+		}
+		for j := range s.Buckets[i] {
+			s.Buckets[i][j] += c.Buckets[i][j]
+		}
+		if c.Min[i] < s.Min[i] || s.N[i] == 0 {
+			s.Min[i] = c.Min[i]
+		}
+		if c.Max[i] > s.Max[i] {
+			s.Max[i] = c.Max[i]
+		}
+		s.N[i] += c.N[i]
 	}
-	if c.End.After(s.End) || s.N == 0 {
-		s.End = c.End
-		s.Seconds = s.End.Sub(s.Begin).Seconds()
-	}
-	for i := range s.Buckets {
-		s.Buckets[i] += c.Buckets[i]
-	}
-	if c.Min < s.Min || s.N == 0 {
-		s.Min = c.Min
-	}
-	if c.Max > s.Max {
-		s.Max = c.Max
-	}
-	s.N += c.N
 }
 
-func (s Stats) Percentiles(p []float64) (q []uint64) {
+func (s Stats) Percentiles(eventType byte, p []float64) (q []uint64) {
 	if len(p) == 0 {
 		return []uint64{}
 	}
@@ -123,9 +170,9 @@ func (s Stats) Percentiles(p []float64) (q []uint64) {
 	n := uint64(0)             // running total event count
 	f := 0.0                   // running total frequency (percentile per bucket)
 	j := 0                     // index in p[] and q[]
-	for i := range s.Buckets {
-		n += s.Buckets[i]
-		f = float64(n) / float64(s.N) * 100
+	for i := range s.Buckets[eventType] {
+		n += s.Buckets[eventType][i]
+		f = float64(n) / float64(s.N[eventType]) * 100
 		// i    f     p[j]   Bucket[i]
 		// ---  ----  -----  -----------------
 		// 100  94.1         500100 (500.1 ms)
@@ -156,6 +203,9 @@ func (s Stats) Percentiles(p []float64) (q []uint64) {
 }
 
 func ParsePercentiles(pCSV string) ([]string, []float64, error) {
+	if strings.TrimSpace(pCSV) == "" {
+		return DefaultPercentileNames, DefaultPercentiles, nil
+	}
 	all := strings.Split(pCSV, ",")
 	if len(all) == 0 {
 		return nil, nil, nil

@@ -26,6 +26,8 @@ type Statement struct {
 	Prepare   bool
 	Defer     bool
 	Begin     bool
+	Commit    bool
+	Write     bool
 	Idle      time.Duration
 	Data      []data.Generator
 	Values    int
@@ -230,6 +232,7 @@ func (f *File) line(line string) error {
 var reKeyVal = regexp.MustCompile(`([\w_-]+)(?:\:\s*(\w+))?`)
 var reData = regexp.MustCompile(`@[\w_-]+`)
 var reCSV = regexp.MustCompile(`\/\*\!csv\s+(\d+)\s+(.+)\*\/`)
+var reFirstWord = regexp.MustCompile(`^(\w+)`)
 
 func (f *File) statement() (Statement, error) {
 	f.stmtNo++
@@ -239,11 +242,16 @@ func (f *File) statement() (Statement, error) {
 	finch.Debug("query raw: %s", query)
 
 	// @todo regexp to extract first word
-	if strings.HasPrefix(strings.ToUpper(query), "SELECT") {
+	com := strings.ToUpper(reFirstWord.FindString(query))
+	switch com {
+	case "SELECT":
 		s.ResultSet = true
-	}
-	if strings.HasPrefix(strings.ToUpper(query), "BEGIN") && strings.HasPrefix(strings.ToUpper(query), "START") {
-		s.Begin = true // used to measure trx per second (TPS)
+	case "BEGIN", "START":
+		s.Begin = true // used to rate limit trx per second (TPS) in client/client.go
+	case "COMMIT":
+		s.Commit = true // used to measure TPS rate in client/client.go
+	case "INSERT", "UPDATE", "DELETE", "REPLACE":
+		s.Write = true
 	}
 
 	for _, mod := range f.lb.mods {

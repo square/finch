@@ -5,9 +5,10 @@ package stats
 import (
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
-	"github.com/dustin/go-humanize"
+	h "github.com/dustin/go-humanize"
 )
 
 // Stdout is a Reporter that prints stats to STDOUT. This is the default when
@@ -22,20 +23,20 @@ type Stdout struct {
 var _ Reporter = &Stdout{}
 
 func NewStdout(opts map[string]string) (*Stdout, error) {
-	if v, ok := opts["percentiles"]; !ok || v == "" {
-		opts["percentiles"] = "95,99,99.9"
-	}
-	s, p, err := ParsePercentiles(opts["percentiles"])
+	sP, nP, err := ParsePercentiles(opts["percentiles"])
 	if err != nil {
 		return nil, err
 	}
-	header := "interval\tevents\tseconds\tQPS\tmin\t"
-	for _, ps := range s {
-		header += ps + "\t"
-	}
-	header += "max\truntime\tcompute"
+	// Default header but s/,/\t/g
+	header := fmt.Sprintf(Header,
+		strings.Join(sP, ","),                   // P total
+		strings.Join(withPrefix(sP, "r_"), ","), // read
+		strings.Join(withPrefix(sP, "w_"), ","), // write
+		strings.Join(withPrefix(sP, "c_"), ","), // commit
+	)
+	header = strings.ReplaceAll(header, ",", "\t")
 	r := &Stdout{
-		p:          p,
+		p:          nP,
 		perCompute: opts["per-compute"] == "yes",
 		w:          tabwriter.NewWriter(os.Stdout, 1, 0, 1, ' ', tabwriter.AlignRight|tabwriter.Debug),
 		header:     header,
@@ -70,12 +71,47 @@ func (r *Stdout) Report(stats []Stats) {
 }
 
 func (r *Stdout) print(s Stats) {
-	fmt.Fprintf(r.w, "%d\t%d\t%.1f\t%s\t%s\t",
-		s.Interval, s.N, s.Seconds, humanize.Comma(int64(float64(s.N)/s.Seconds)), humanize.Comma(s.Min))
-	for _, p := range s.Percentiles(r.p) {
-		fmt.Fprintf(r.w, "%s\t", humanize.Comma(int64(p)))
-	}
-	fmt.Fprintf(r.w, "%s\t%d\t%s\n", humanize.Comma(s.Max), s.Runtime, s.Compute)
+	line := fmt.Sprintf("%d\t%1.f\t%d\t%d\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\n",
+		s.Interval,
+		s.Seconds, // duration (of interval)
+		s.Runtime,
+		0, // clients @todo
+
+		// TOTAL
+		h.Comma(int64(float64(s.N[TOTAL])/s.Seconds)), // QPS
+		h.Comma(s.Min[TOTAL]),
+		// P
+		h.Comma(s.Max[TOTAL]),
+
+		// READ
+		h.Comma(int64(float64(s.N[READ])/s.Seconds)),
+		h.Comma(s.Min[READ]),
+		// P
+		h.Comma(s.Max[READ]),
+
+		// WRITE
+		h.Comma(int64(float64(s.N[WRITE])/s.Seconds)),
+		h.Comma(s.Min[WRITE]),
+		// P
+		h.Comma(s.Max[WRITE]),
+
+		// COMMIT
+		h.Comma(int64(float64(s.N[COMMIT])/s.Seconds)), // TPS
+		h.Comma(s.Min[COMMIT]),
+		// P
+		h.Comma(s.Max[COMMIT]),
+
+		// Compute (hostname)
+		s.Compute,
+	)
+
+	// Replace P in Fmt with the CSV percentile values
+	line = strings.Replace(line, "P", intsToString(s.Percentiles(TOTAL, r.p), "\\t", true), 1)
+	line = strings.Replace(line, "P", intsToString(s.Percentiles(READ, r.p), "\\t", true), 1)
+	line = strings.Replace(line, "P", intsToString(s.Percentiles(WRITE, r.p), "\\t", true), 1)
+	line = strings.Replace(line, "P", intsToString(s.Percentiles(COMMIT, r.p), "\\t", true), 1)
+
+	fmt.Fprintf(r.w, line)
 }
 
 func (r *Stdout) Stop() {}

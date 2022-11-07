@@ -10,6 +10,30 @@ import (
 	"github.com/square/finch/stats"
 )
 
+func TestBasicStats(t *testing.T) {
+	s := stats.NewStats()
+
+	s.Reset()
+
+	s.Record(stats.READ, 200)
+	s.Record(stats.READ, 200)
+	s.Record(stats.READ, 200)
+
+	s.Record(stats.TOTAL, 100)
+	s.Record(stats.TOTAL, 100)
+
+	snapshot := s.Snapshot()
+	if snapshot.N[stats.TOTAL] != 5 {
+		t.Errorf("got %d events total, expected 5", snapshot.N[stats.TOTAL])
+	}
+
+	if snapshot.N[stats.READ] != 3 {
+		t.Errorf("got %d reads, expected 3", snapshot.N[stats.READ])
+	}
+
+	// @todo finish
+}
+
 func TestPecentiles_P9s(t *testing.T) {
 	v := [][]int64{
 		{125000, 1},  // 125 ms  -- 125892.541179 (205) -- P0.38
@@ -27,15 +51,15 @@ func TestPecentiles_P9s(t *testing.T) {
 	s := stats.NewStats()
 	for i := range v {
 		for j := int64(0); j < v[i][1]; j++ {
-			s.Record(v[i][0])
+			s.Record(stats.TOTAL, v[i][0])
 		}
 	}
 
-	if s.N != 262 {
+	if s.N[stats.TOTAL] != 262 {
 		t.Errorf("N = %d, expected 262", s.N)
 	}
 
-	p := s.Percentiles([]float64{50, 95, 99, 99.9})
+	p := s.Percentiles(stats.TOTAL, []float64{50, 95, 99, 99.9})
 	expect := []uint64{
 		309111, // P50
 		331131, // P95
@@ -61,15 +85,15 @@ func TestPecentiles_P50(t *testing.T) {
 	s := stats.NewStats()
 	for i := range v {
 		for j := int64(0); j < v[i][1]; j++ {
-			s.Record(v[i][0])
+			s.Record(stats.TOTAL, v[i][0])
 		}
 	}
 
-	if s.N != 60 {
+	if s.N[stats.TOTAL] != 60 {
 		t.Errorf("N = %d, expected 60", s.N)
 	}
 
-	p := s.Percentiles([]float64{50})
+	p := s.Percentiles(stats.TOTAL, []float64{50})
 	expect := []uint64{301995}
 	if diff := deep.Equal(p, expect); diff != nil {
 		t.Error(diff)

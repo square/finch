@@ -195,7 +195,7 @@ ITER:
 				} else {
 					rows, err = c.conn.QueryContext(ctxRun, fmt.Sprintf(c.Statements[i].Query, c.data[i]...))
 				}
-				c.Stats.Record(time.Now().Sub(t).Microseconds())
+				c.Stats.Record(stats.READ, time.Now().Sub(t).Microseconds())
 				if err != nil {
 					err = fmt.Errorf("querying %s: %w", c.Statements[i].Query, err)
 					if !c.connect(ctxRun, err) {
@@ -233,7 +233,15 @@ ITER:
 				} else {
 					res, err = c.conn.ExecContext(ctxRun, fmt.Sprintf(c.Statements[i].Query, c.data[i]...))
 				}
-				c.Stats.Record(time.Now().Sub(t).Microseconds())
+				switch {
+				case c.Statements[i].Write:
+					c.Stats.Record(stats.WRITE, time.Now().Sub(t).Microseconds())
+				case c.Statements[i].Commit:
+					c.Stats.Record(stats.COMMIT, time.Now().Sub(t).Microseconds())
+				default:
+					// BEGIN, SET, and other statements that aren't reads or writes
+					c.Stats.Record(stats.TOTAL, time.Now().Sub(t).Microseconds())
+				}
 				if err != nil {
 					err = fmt.Errorf("executing %s: %w", c.Statements[i].Query, err)
 					if !c.connect(ctxRun, err) {
