@@ -24,6 +24,7 @@ type Stats struct {
 	*sync.Mutex
 	Begin    time.Time  // start of interval
 	Buckets  [][]uint64 // response time (μs) for percentiles
+	Clients  int        // number of clients, set by Collector
 	Compute  string     // "local" or remote name, set by Collector
 	End      time.Time  // end of interval
 	Interval uint       // interval number, monotonically inc, set by Collector
@@ -110,8 +111,16 @@ func (s *Stats) Reset() {
 
 // Snapshot returns a copy of the current stats and resets all values.
 func (s *Stats) Snapshot() Stats {
-	End := time.Now()
+	now := time.Now()
 	s.Lock()
+	snapshot := s.Copy()
+	snapshot.End = now
+	s.Reset()
+	s.Unlock()
+	return snapshot
+}
+
+func (s *Stats) Copy() Stats {
 	// MUST COPY to combine because Go slices are refs
 	buckets := make([][]uint64, nEventTypes)
 	min := make([]int64, nEventTypes)
@@ -125,16 +134,18 @@ func (s *Stats) Snapshot() Stats {
 		n[i] = s.N[i]
 	}
 	snapshot := Stats{
-		Begin:   s.Begin,
-		End:     End,
-		Seconds: End.Sub(s.Begin).Seconds(),
-		N:       n,
-		Min:     min,
-		Max:     max,
-		Buckets: buckets,
+		Begin:    s.Begin,
+		Buckets:  buckets,
+		Clients:  s.Clients,
+		Compute:  s.Compute,
+		End:      s.End,
+		Interval: s.Interval,
+		Min:      min,
+		Max:      max,
+		N:        n,
+		Runtime:  s.Runtime,
+		Seconds:  s.End.Sub(s.Begin).Seconds(),
 	}
-	s.Reset()
-	s.Unlock()
 	return snapshot
 }
 
@@ -160,6 +171,7 @@ func (s *Stats) Combine(c Stats) {
 		}
 		s.N[i] += c.N[i]
 	}
+	s.Clients += c.Clients
 }
 
 func (s Stats) Percentiles(eventType byte, p []float64) (q []uint64) {

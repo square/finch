@@ -57,7 +57,7 @@ func NewCSV(opts map[string]string) (CSV, error) {
 }
 
 func (r CSV) Report(stats []Stats) {
-	total := stats[0]
+	total := stats[0].Copy() // copy to avoid reporters modifying vals via slice ref
 	for i := range stats[1:] {
 		total.Combine(stats[1+i])
 	}
@@ -71,7 +71,7 @@ func (r CSV) Report(stats []Stats) {
 		total.Interval,
 		total.Seconds, // duration (of interval)
 		total.Runtime,
-		0, // clients @todo
+		total.Clients,
 
 		// TOTAL
 		int64(float64(total.N[TOTAL])/total.Seconds), // QPS

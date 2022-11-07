@@ -74,6 +74,7 @@ func (r *Collector) report() {
 	total := NewStats() // all clients
 	total.Interval = r.interval
 	total.Compute = r.name
+	total.Clients = len(r.all)
 	total.Runtime = uint(runtime.Seconds())
 	for _, s := range r.all {
 		total.Combine(s.Snapshot())

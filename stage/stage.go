@@ -127,6 +127,7 @@ CLIENTS:
 	}
 
 	if s.stats != nil {
+		time.Sleep(250 * time.Millisecond)
 		s.stats.Stop()
 	}
 

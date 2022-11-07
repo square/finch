@@ -57,7 +57,7 @@ func (r *Stdout) Report(stats []Stats) {
 			r.print(s)
 		}
 	} else {
-		total := stats[0]
+		total := stats[0].Copy() // copy to avoid reporters modifying vals via slice ref
 		for i := range stats[1:] {
 			total.Combine(stats[1+i])
 		}
@@ -75,7 +75,7 @@ func (r *Stdout) print(s Stats) {
 		s.Interval,
 		s.Seconds, // duration (of interval)
 		s.Runtime,
-		0, // clients @todo
+		s.Clients,
 
 		// TOTAL
 		h.Comma(int64(float64(s.N[TOTAL])/s.Seconds)), // QPS
