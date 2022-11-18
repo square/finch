@@ -10,6 +10,7 @@ import (
 func init() {
 	Register("int-not-null", f)
 	Register("int-range", f)
+	Register("int-sequence", f)
 	Register("project-int", f)
 	Register("str-not-null", f)
 	Register("column", f)
@@ -71,6 +72,8 @@ func (f factory) Make(name, dataName string, params map[string]string) (Generato
 		return IntNotNull{Max: max}, nil
 	case "int-range":
 		return NewIntRange(id, params)
+	case "int-sequence":
+		return NewIntSequence(id, params)
 	case "str-not-null":
 		s, ok := params["len"]
 		if !ok {
