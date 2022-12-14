@@ -21,6 +21,14 @@ const (
 	STAGE_CLEANUP   = "cleanup"
 )
 
+// global
+// └──stage
+//    └──sequence
+//       └──client group
+//          └──client
+//             └──trx
+//                └──statment
+
 const (
 	SCOPE_STATEMENT   = "s"
 	SCOPE_TRANSACTION = "t"

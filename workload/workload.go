@@ -77,10 +77,16 @@ func (src Trx) ClientCopy(clientNo int) []Statement {
 		dst.Data = make([]data.Generator, len(src.Statements[i].Data))
 		for j, g := range src.Statements[i].Data {
 
-			if g.Scope() == finch.SCOPE_TRANSACTION {
-				dst.Data[j] = dstTrxData[g.Id().DataName] // first and only copy for trx
-			} else {
-				dst.Data[j] = g.Copy(clientNo) // new copy for this statement
+			switch g.Scope() {
+			case finch.SCOPE_WORKLOAD:
+				// One data gen for the whole trx, all clients, this stage
+				// @todo
+			case finch.SCOPE_TRANSACTION:
+				// One data gen for the whole trx, this client
+				dst.Data[j] = dstTrxData[g.Id().DataName]
+			default:
+				// New data gen for this statment, this client
+				dst.Data[j] = g.Copy(clientNo)
 			}
 
 			// Is this data gen a pointer to an original data.Column, then

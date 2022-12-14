@@ -137,9 +137,9 @@ func (c *Stage) Validate(name string) error {
 }
 
 type Data struct {
-	Name      string            // @id
-	Generator string            // data.Generator type
-	Params    map[string]string // Generator-specific params
+	Name      string            `yaml:"name"`      // @id
+	Generator string            `yaml:"generator"` // data.Generator type
+	Params    map[string]string `yaml:"params"`    // Generator-specific params
 }
 
 type ClientGroup struct {
