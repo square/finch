@@ -1,0 +1,98 @@
+mysql:
+  dsn: "root@tcp(127.0.0.1:3306)/finch"
+
+stats:
+  freq: 5s
+
+setup:
+  clients:
+    - n: 1
+      transactions: [schema.sql]
+      iterations: 1
+    - n: 4
+      transactions: [insert-cust-bal.sql]
+    - n: 4
+      transactions: [insert-xfers.sql]
+  workload:
+    - file: ./schema.sql
+    - file: ./insert-cust-bal.sql
+      data:
+        c_token:
+          generator: xid
+          params:
+            rows: 4 # same xid 4x for 1 row in customers + 3 rows in balances
+        b_token:
+          generator: xid
+        c_c1:
+          generator: "str-not-null"
+          params:
+            len: 20
+        c_c2:
+          generator: "str-not-null"
+          params:
+            len: 50
+        c_c3:
+          generator: "str-not-null"
+          params:
+            len: 75
+        b_c1:
+          generator: "str-not-null"
+          params:
+            len: 30
+        b_c2:
+          generator: "str-not-null"
+          params:
+            len: 50
+    - file: ./insert-xfers.sql
+      data:
+        x_token:
+          generator: "xid"
+        s_token:
+          generator: "xid"
+        r_token:
+          generator: "xid"
+        c1:
+          generator: "str-not-null"
+          params:
+            len: 10
+        c2:
+          generator: "str-not-null"
+          params:
+            len: 50
+        c3:
+          generator: "str-not-null"
+          params:
+            len: 5
+
+benchmark:
+  runtime: "60s"
+  clients:
+    - n: 4
+  workload:
+    - file: ./xfer.sql
+      data:
+        id:
+          generator: "project-int"
+          params:
+            input-max: 1000000
+            output-range: "750000..1000000"
+        id_100:
+          generator: "int-range"
+          params:
+            size: 100    # random 100-value range between
+            min:  750000 #   750,000 and
+            max: 1000000 # 1,000,000
+        x_token:
+          generator: xid
+        c1:
+          generator: "str-not-null"
+          params:
+            len: 25
+        c2:
+          generator: "str-not-null"
+          params:
+            len: 75
+        c3:
+          generator: "str-not-null"
+          params:
+            len: 10
