@@ -11,26 +11,31 @@ import (
 	"github.com/square/finch"
 	"github.com/square/finch/client"
 	"github.com/square/finch/config"
+	"github.com/square/finch/data"
 	"github.com/square/finch/limit"
 	"github.com/square/finch/stats"
+	"github.com/square/finch/trx"
 	"github.com/square/finch/workload"
 )
 
 // A stage runs clients to execute events. Each client is identical.
 // Stage runs the workload, controlling the order (by subset, if any).
 type Stage struct {
-	cfg config.Stage
+	cfg   config.Stage
+	scope *data.Scope
+	stats *stats.Collector
 	// --
-	clients  [][]*client.Client // [seqNo][Client...]
-	doneChan chan error         // <-Client.Run()
-	stats    *stats.Collector
+	doneChan chan error // <-Client.Run()
+	clients  [][]*client.Client
 }
 
-func New(cfg config.Stage, r *stats.Collector) *Stage {
+func New(cfg config.Stage, s *data.Scope, r *stats.Collector) *Stage {
 	return &Stage{
-		cfg:      cfg,
+		cfg:   cfg,
+		scope: s,
+		stats: r,
+		// --
 		doneChan: make(chan error, 1),
-		stats:    r,
 	}
 }
 
@@ -39,38 +44,47 @@ func (s *Stage) Prepare() error {
 		finch.Debug("stage %s disabled", s.cfg.Name)
 		return nil
 	}
+	if len(s.cfg.Trx) == 0 {
+		finch.Debug("stage %s disabled", s.cfg.Name)
+		return nil
+	}
 	log.Printf("Preparing stage %s\n", s.cfg.Name)
 
-	// Load workload
-	order, trx, err := workload.Transactions(s.cfg.Workload)
+	// Load trx set
+	trxSet, err := trx.Load(s.cfg.Trx, s.scope)
 	if err != nil {
 		return err
 	}
-	if len(trx) == 0 {
-		return fmt.Errorf("no statements")
+	for _, trxName := range trxSet.Order {
+		if len(trxSet.Statements[trxName]) == 0 {
+			return fmt.Errorf("transactions %s has zero statements, at least 1 required", trxName)
+		}
 	}
 
 	// Allocate client groups based on sequence
-	a := client.AllocateArgs{
-		Stage:          s.cfg.Name,
-		ClientGroups:   s.cfg.Clients,
-		AutoAllocation: !s.cfg.DisableAutoAllocation,
-		Trx:            trx,
-		WorkloadOrder:  order,
-		Sequence:       s.cfg.Sequence,
-		DoneChan:       s.doneChan,
-		StageQPS:       limit.NewRate(s.cfg.QPS), // nil if config.stage.qps == 0
-		StageTPS:       limit.NewRate(s.cfg.TPS), // nil if config.stage.tps == 0
+	a := workload.Allocator{
+		Stage:      s.cfg.Name,
+		TrxSet:     trxSet,
+		ExecGroups: s.cfg.Workload,
+		ExecMode:   s.cfg.Exec,
+		StageQPS:   limit.NewRate(s.cfg.QPS), // nil if config.stage.qps == 0
+		StageTPS:   limit.NewRate(s.cfg.TPS), // nil if config.stage.tps == 0
+		DoneChan:   s.doneChan,
+		Auto:       !s.cfg.DisableAutoAllocation,
 	}
-	s.clients, err = client.Allocate(a)
+	groups, err := a.Groups()
+	if err != nil {
+		return err
+	}
+	s.clients, err = a.Clients(groups)
 	if err != nil {
 		return err
 	}
 
 	// Prepare clients (e.g. create prepared statement handle) and register
 	// with stats.Collector
-	for seqNo := range s.clients {
-		for _, c := range s.clients[seqNo] {
+	for e := range s.clients {
+		for _, c := range s.clients[e] {
 			if err := c.Prepare(); err != nil {
 				return err
 			}
@@ -101,13 +115,13 @@ func (s *Stage) Run(ctxServer context.Context) error {
 	}
 
 CLIENTS:
-	for seqNo := range s.clients {
-		log.Printf("Sequence %d, %d clients", seqNo, len(s.clients[seqNo]))
-		for _, client := range s.clients[seqNo] {
-			go client.Run(ctx)
+	for e := range s.clients {
+		log.Printf("Execution group %d, %d clients", e, len(s.clients[e]))
+		for _, c := range s.clients[e] {
+			go c.Run(ctx)
 		}
 
-		nRunning := len(s.clients[seqNo])
+		nRunning := len(s.clients[e])
 		for nRunning > 0 {
 			// Wait for clients
 			select {

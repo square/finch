@@ -38,19 +38,15 @@ func (g *StrNotNull) Id() Id {
 	return g.id
 }
 
-func (g *StrNotNull) Scope() string {
-	return finch.SCOPE_STATEMENT
-}
-
 func (g *StrNotNull) Format() string {
 	return "'%s'"
 }
 
-func (g *StrNotNull) Copy(clientNo int) Generator {
-	return NewStrNotNull(g.id.Copy(clientNo), g.n)
+func (g *StrNotNull) Copy(r finch.RunLevel) Generator {
+	return NewStrNotNull(g.id.Copy(r), g.n)
 }
 
-func (g *StrNotNull) Values() []interface{} {
+func (g *StrNotNull) Values(_ finch.ExecCount) []interface{} {
 	sb := strings.Builder{}
 	sb.Grow(g.n)
 	// A src.Int63() generates 63 random bits, enough for letterIdxMax characters!

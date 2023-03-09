@@ -193,7 +193,7 @@ func (c *Local) Boot(ctx context.Context, cfg config.File) error {
 // Run runs all the stages on all the instances (local and remote).
 func (c *Local) Run(ctx context.Context) error {
 	// Run setup on local only
-	if !c.cfg.Setup.Disable && len(c.cfg.Setup.Workload) > 0 && c.local != nil {
+	if !c.cfg.Setup.Disable && len(c.cfg.Setup.Trx) > 0 && c.local != nil {
 		if err := c.local.Run(ctx, finch.STAGE_SETUP); err != nil {
 			return err
 		}
@@ -203,12 +203,12 @@ func (c *Local) Run(ctx context.Context) error {
 	// BENCHMARK
 	// ----------------------------------------------------------------------
 	// Run warmup and benchmark on local and remotes (if any)
-	if !c.cfg.Warmup.Disable && len(c.cfg.Warmup.Workload) > 0 {
+	if !c.cfg.Warmup.Disable && len(c.cfg.Warmup.Trx) > 0 {
 		if err := c.run(ctx, finch.STAGE_WARMUP); err != nil {
 			return err
 		}
 	}
-	if !c.cfg.Benchmark.Disable && len(c.cfg.Benchmark.Workload) > 0 {
+	if !c.cfg.Benchmark.Disable && len(c.cfg.Benchmark.Trx) > 0 {
 		go c.ag.Run()
 		if err := c.run(ctx, finch.STAGE_BENCHMARK); err != nil {
 			return err
@@ -225,7 +225,7 @@ func (c *Local) Run(ctx context.Context) error {
 	c.Unlock()
 
 	// Run cleanup on local only
-	if !c.cfg.Cleanup.Disable && len(c.cfg.Cleanup.Workload) > 0 && c.local != nil {
+	if !c.cfg.Cleanup.Disable && len(c.cfg.Cleanup.Trx) > 0 && c.local != nil {
 		if err := c.local.Run(ctx, finch.STAGE_CLEANUP); err != nil {
 			return err
 		}
@@ -440,13 +440,13 @@ func (c *Local) remoteFile(w http.ResponseWriter, r *http.Request) {
 	var trx []config.Trx
 	switch stage {
 	case finch.STAGE_SETUP:
-		trx = c.cfg.Setup.Workload
+		trx = c.cfg.Setup.Trx
 	case finch.STAGE_WARMUP:
-		trx = c.cfg.Warmup.Workload
+		trx = c.cfg.Warmup.Trx
 	case finch.STAGE_BENCHMARK:
-		trx = c.cfg.Benchmark.Workload
+		trx = c.cfg.Benchmark.Trx
 	case finch.STAGE_CLEANUP:
-		trx = c.cfg.Cleanup.Workload
+		trx = c.cfg.Cleanup.Trx
 	default:
 		http.Error(w, "invalid stage: "+stage, http.StatusBadRequest)
 		return

@@ -4,6 +4,7 @@ package limit
 
 import (
 	"context"
+	"fmt"
 
 	gorate "golang.org/x/time/rate"
 
@@ -11,28 +12,43 @@ import (
 )
 
 type Rate interface {
+	Adjust(byte)
+	Current() (byte, string)
 	Allow() <-chan bool
+	Stop()
 }
 
 type rate struct {
-	c  chan bool
-	n  uint64
-	rl *gorate.Limiter
+	c        chan bool
+	n        uint
+	rl       *gorate.Limiter
+	stopChan chan struct{}
 }
 
 var _ Rate = &rate{}
 
-func NewRate(perSecond uint64) Rate {
+func NewRate(perSecond uint) Rate {
 	if perSecond == 0 {
 		return nil
 	}
 	finch.Debug("new rate: %d/s", perSecond)
 	lm := &rate{
-		rl: gorate.NewLimiter(gorate.Limit(perSecond), 1),
-		c:  make(chan bool, 1),
+		rl:       gorate.NewLimiter(gorate.Limit(perSecond), 1),
+		c:        make(chan bool, 1),
+		stopChan: make(chan struct{}),
 	}
 	go lm.run()
 	return lm
+}
+
+func (lm *rate) Adjust(p byte) {
+}
+
+func (lm *rate) Current() (p byte, s string) {
+	return 0, ""
+}
+
+func (lm *rate) Stop() {
 }
 
 func (lm *rate) Allow() <-chan bool {
@@ -49,6 +65,8 @@ func (lm *rate) run() {
 		}
 		select {
 		case lm.c <- true:
+		case <-lm.stopChan:
+			return
 		default:
 			// dropped
 		}
@@ -59,12 +77,12 @@ func (lm *rate) run() {
 
 type and struct {
 	c chan bool
-	n uint64
+	n uint
 	a Rate
 	b Rate
 }
 
-var _ Rate = and{}
+var _ Rate = &and{}
 
 // And makes a Rate limiter that allows execution when both a and b allow it.
 // This is used to combine QPS and TPS rate limits to keep clients at or below
@@ -79,7 +97,7 @@ func And(a, b Rate) Rate {
 	if a != nil && b == nil {
 		return a
 	}
-	lm := and{
+	lm := &and{
 		a: a,
 		b: b,
 		c: make(chan bool, 1),
@@ -88,14 +106,33 @@ func And(a, b Rate) Rate {
 	return lm
 }
 
-func (lm and) Allow() <-chan bool {
+func (lm *and) Allow() <-chan bool {
 	return lm.c
 }
 
-func (lm and) N(_ uint64) {
+func (lm *and) N(_ uint) {
 }
 
-func (lm and) run() {
+func (lm *and) Adjust(p byte) {
+	lm.a.Adjust(p)
+	lm.b.Adjust(p)
+}
+
+func (lm *and) Current() (p byte, s string) {
+	p1, s1 := lm.a.Current()
+	p2, s2 := lm.a.Current()
+	if p1 != p2 {
+		panic(fmt.Sprintf("lm.A %d != lm.B %d", p1, p2))
+	}
+	return p1, s1 + " and " + s2
+}
+
+func (lm *and) Stop() {
+	lm.a.Stop()
+	lm.b.Stop()
+}
+
+func (lm *and) run() {
 	a := false
 	b := false
 	for {

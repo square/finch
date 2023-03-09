@@ -10,31 +10,40 @@ import (
 )
 
 type Column struct {
-	id      Id
-	col     string
-	colType string
-	r       bool
-	v       interface{}
-	b       *bytes.Buffer
+	id     Id
+	params map[string]string
+	// --
+	col          string
+	colType      string
+	val          interface{}
+	bytes        *bytes.Buffer
+	useBytes     bool
+	rowsAffected bool // save/return sql.Result.RowsAffected
+	rRows        int64
+	insertId     bool // save/return sql.Result.LastInsertId
+	rId          int64
 }
 
 var _ Generator = &Column{}
 var _ sql.Scanner = &Column{}
 
-func NewColumn(id Id, col, colType string) *Column {
+func NewColumn(id Id, params map[string]string) *Column {
+	// Set default scope if not explicitly configured
+	if id.Scope == "" {
+		id.Scope = finch.SCOPE_TRX
+	}
 	return &Column{
-		id:      id,
-		col:     col,
-		colType: colType,
+		id:           id,
+		params:       params,
+		col:          params["name"],
+		colType:      params["type"],
+		rowsAffected: finch.Bool(params["save-rows"]),
+		insertId:     finch.Bool(params["save-insert-id"]),
 	}
 }
 
 func (g *Column) Id() Id {
 	return g.id
-}
-
-func (g *Column) Scope() string {
-	return finch.SCOPE_TRANSACTION
 }
 
 func (g *Column) Format() string {
@@ -44,32 +53,49 @@ func (g *Column) Format() string {
 	return "'%v'"
 }
 
-func (g *Column) Copy(clientNo int) Generator {
-	return NewColumn(g.id.Copy(clientNo), g.col, g.colType)
+func (g *Column) Copy(r finch.RunLevel) Generator {
+	return NewColumn(g.id.Copy(r), g.params)
 }
 
-func (g *Column) Values() []interface{} {
-	if g.r {
-		return []interface{}{g.b.String()}
+func (g *Column) Values(_ finch.ExecCount) []interface{} {
+	if g.insertId {
+		return []interface{}{g.rId}
 	}
-	return []interface{}{g.v}
+	if g.rowsAffected {
+		return []interface{}{g.rRows}
+	}
+	if g.useBytes {
+		return []interface{}{g.bytes.String()}
+	}
+	return []interface{}{g.val}
 }
 
 func (g *Column) Scan(any interface{}) error {
+	// sql.Result values from a write
+	if g.insertId || g.rowsAffected {
+		v := any.([]int64)
+		g.rRows = v[0]
+		g.rId = v[1]
+		return nil
+	}
+
+	// Column value from SELECT
 	switch any.(type) {
 	case []byte:
-		g.r = true // is reference; copy bytes
-		if g.b == nil {
-			g.b = bytes.NewBuffer(make([]byte, len(any.([]byte))))
+		g.useBytes = true // is reference; copy bytes
+		if g.bytes == nil {
+			g.bytes = bytes.NewBuffer(make([]byte, len(any.([]byte))))
 		}
-		g.b.Reset()
-		g.b.Write(any.([]byte))
+		g.bytes.Reset()
+		g.bytes.Write(any.([]byte))
 	default:
-		g.r = false // not reference; copy value
-		g.v = any
+		g.useBytes = false // not reference; copy value
+		g.val = any
 	}
 	return nil
 }
+
+// --------------------------------------------------------------------------
 
 var Noop = noop{}
 
@@ -79,22 +105,21 @@ var _ Generator = noop{}
 var _ sql.Scanner = noop{}
 
 func (g noop) Id() Id {
-	return Id{}
-}
-
-func (g noop) Scope() string {
-	return finch.SCOPE_GLOBAL
+	return Id{
+		Scope: finch.SCOPE_GLOBAL,
+		Type:  "no-op",
+	}
 }
 
 func (g noop) Format() string {
 	return ""
 }
 
-func (g noop) Copy(clientNo int) Generator {
+func (g noop) Copy(r finch.RunLevel) Generator {
 	return g
 }
 
-func (g noop) Values() []interface{} {
+func (g noop) Values(_ finch.ExecCount) []interface{} {
 	return nil
 }
 

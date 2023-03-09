@@ -1,0 +1,22 @@
+
+benchmark:
+  sequence: client|trx|(auto)
+  clients:
+    - n: 2
+      trx: ["A"]
+    - n: 2
+      trx: ["B"]
+  trx:
+    - name: "A"
+      file: "a.sql"
+      data:
+        foo:
+          generator: int
+          scope: statement
+    - name: "B"
+      file: "b.sql"
+      data:
+        bar:
+          generator: int
+          scope: trx
+
