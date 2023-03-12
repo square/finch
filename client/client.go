@@ -16,11 +16,6 @@ import (
 	"github.com/square/finch/trx"
 )
 
-type Group struct {
-	ExecGroup string
-	Trx       []string
-}
-
 // Client executes SQL statements.
 type Client struct {
 	RunLevel         finch.RunLevel

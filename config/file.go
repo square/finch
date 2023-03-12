@@ -171,13 +171,6 @@ func (c *ExecGroup) Validate(w []Trx) error {
 	return nil
 }
 
-/*
-	throttler
-		   stage QPS
-		&& group QPS
-		&& client QPS
-*/
-
 // --------------------------------------------------------------------------
 
 type MySQL struct {

@@ -22,10 +22,6 @@ const (
 	STAGE_CLEANUP   = "cleanup"
 )
 
-// workload = client groups + transactions
-// transactions
-// └──statements
-
 // Execution is sequenced by execution group: sequential or concurrent.
 // All clients in an execution group execute together, concurrently.
 // Client groups vary the number of clients and trx those clients execute (within an exec group).

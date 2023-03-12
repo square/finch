@@ -1,1 +1,0 @@
-interval,duration,runtime,clients,QPS,min,P95,P99,P99.99,max,r_QPS,r_min,r_P95,r_P99,r_P99.99,r_max,w_QPS,w_min,w_P95,w_P99,w_P99.99,w_max,TPS,c_min,c_P95,c_P99,c_P99.99,c_max,compute
