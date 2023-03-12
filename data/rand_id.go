@@ -9,61 +9,40 @@ import (
 )
 
 type Xid struct {
-	rows int
-	vals []string
-	i    int
-	id   Id
+	id    Id
+	trxNo uint
+	val   string
 }
 
 var _ Generator = &Xid{}
 
-func NewXid(id Id, rows int) *Xid {
-	if rows <= 1 {
-		return &Xid{id: id, rows: 1}
+func NewXid(id Id) *Xid {
+	// Set default scope if not explicitly configured
+	if id.Scope == "" {
+		id.Scope = finch.SCOPE_TRX
 	}
 	return &Xid{
-		rows: rows,
-		i:    rows,
-		vals: make([]string, rows),
-		id:   id,
+		id: id,
 	}
 }
 
-func (g *Xid) Id() Id {
-	return g.id
+func (g *Xid) Id() Id                     { return g.id }
+func (g *Xid) Format() string             { return "'%s'" }
+func (g *Xid) Scan(any interface{}) error { return nil }
+
+func (g *Xid) Copy(r finch.RunLevel) Generator {
+	return NewXid(g.id.Copy(r))
 }
 
-func (g *Xid) Scope() string {
-	if g.rows == 1 {
-		return finch.SCOPE_GLOBAL
-	}
-	return finch.SCOPE_TRANSACTION
-}
-
-func (g *Xid) Format() string {
-	return "'%s'"
-}
-
-func (g *Xid) Copy(clientNo int) Generator {
-	return NewXid(g.id.Copy(clientNo), g.rows)
-}
-
-func (g *Xid) Values() []interface{} {
-	if g.rows == 1 {
-		return []interface{}{xid.New().String()}
-	}
-	if g.i == g.rows {
-		s := xid.New().String()
-		for i := 0; i < g.rows; i++ {
-			g.vals[i] = s
+func (g *Xid) Values(c finch.ExecCount) []interface{} {
+	switch g.id.Scope {
+	case finch.SCOPE_TRX:
+		if c[finch.TRX] > g.trxNo { // new trx
+			g.trxNo = c[finch.TRX]
+			g.val = xid.New().String()
 		}
-		g.i = 1
-	} else {
-		g.i++
+	default:
+		g.val = xid.New().String()
 	}
-	return []interface{}{g.vals[g.i-1]}
-}
-
-func (g *Xid) Scan(any interface{}) error {
-	return nil
+	return []interface{}{g.val}
 }

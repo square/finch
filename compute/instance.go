@@ -9,6 +9,7 @@ import (
 
 	"github.com/square/finch"
 	"github.com/square/finch/config"
+	"github.com/square/finch/data"
 	"github.com/square/finch/dbconn"
 	"github.com/square/finch/stage"
 	"github.com/square/finch/stats"
@@ -51,32 +52,37 @@ func (comp *Instance) Boot(ctx context.Context, cfg config.File) error {
 	// Prepare stages
 	// //////////////////////////////////////////////////////////////////////
 
-	if len(cfg.Setup.Workload) > 0 {
-		stage := stage.New(cfg.Setup, nil)
+	global := data.NewScope()
+
+	if !cfg.Setup.Disable {
+		stage := stage.New(cfg.Setup, global, nil)
 		if err := stage.Prepare(); err != nil {
 			return err
 		}
 		comp.stages[finch.STAGE_SETUP] = stage
+		global.Reset() // keep global scope data generators; delete the rest
 	}
 
-	if len(cfg.Warmup.Workload) > 0 {
-		stage := stage.New(cfg.Warmup, nil)
+	if !cfg.Warmup.Disable {
+		stage := stage.New(cfg.Warmup, global, nil)
 		if err := stage.Prepare(); err != nil {
 			return err
 		}
 		comp.stages[finch.STAGE_WARMUP] = stage
+		global.Reset()
 	}
 
-	if len(cfg.Benchmark.Workload) > 0 {
-		stage := stage.New(cfg.Benchmark, comp.stats)
+	if !cfg.Benchmark.Disable {
+		stage := stage.New(cfg.Benchmark, global, comp.stats)
 		if err := stage.Prepare(); err != nil {
 			return err
 		}
 		comp.stages[finch.STAGE_BENCHMARK] = stage
+		global.Reset()
 	}
 
-	if len(cfg.Cleanup.Workload) > 0 {
-		stage := stage.New(cfg.Cleanup, nil)
+	if !cfg.Cleanup.Disable {
+		stage := stage.New(cfg.Cleanup, global, nil)
 		if err := stage.Prepare(); err != nil {
 			return err
 		}

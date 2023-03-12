@@ -1,5 +1,6 @@
 *.tmp
 *.swp
+*.out
 bin/finch/finch
 bin/finch/finch-amd64
 bin/finch/*.yaml

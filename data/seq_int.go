@@ -3,6 +3,7 @@ package data
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/square/finch"
 )
@@ -51,17 +52,14 @@ func NewIntSequence(id Id, params map[string]string) (*IntSequence, error) {
 
 func (g *IntSequence) Id() Id { return g.id }
 
-func (g *IntSequence) Scope() string { return finch.SCOPE_TRANSACTION }
-
 func (g *IntSequence) Format() string { return "%d" }
 
-func (g *IntSequence) Copy(clientNo int) Generator {
-	return g
-	gCopy, _ := NewIntSequence(g.id.Copy(clientNo), g.params)
-	return gCopy
+func (g *IntSequence) Copy(r finch.RunLevel) Generator {
+	c, _ := NewIntSequence(g.id.Copy(r), g.params)
+	return c
 }
 
-func (g *IntSequence) Values() []interface{} {
+func (g *IntSequence) Values(_ finch.ExecCount) []interface{} {
 	g.Lock()
 	lower := g.n
 	upper := g.n + g.size
@@ -79,3 +77,28 @@ func (g *IntSequence) Values() []interface{} {
 func (g *IntSequence) Scan(any interface{}) error {
 	return nil
 }
+
+// --------------------------------------------------------------------------
+
+type IncUint64 struct {
+	i  uint64
+	id Id
+}
+
+var _ Generator = &IncUint64{}
+
+func NewIncUint64(id Id, params map[string]string) *IncUint64 {
+	return &IncUint64{id: id}
+}
+
+func (g *IncUint64) Id() Id { return g.id }
+
+func (g *IncUint64) Format() string { return "%d" }
+
+func (g *IncUint64) Copy(r finch.RunLevel) Generator { return NewIncUint64(g.id.Copy(r), nil) }
+
+func (g *IncUint64) Values(_ finch.ExecCount) []interface{} {
+	return []interface{}{atomic.AddUint64(&g.i, 1)}
+}
+
+func (g *IncUint64) Scan(any interface{}) error { return nil }

@@ -71,7 +71,7 @@ func (s *Stats) Record(eventType byte, d int64) {
 
 	s.Lock()
 
-	// Record for event type: READ, WRITE, or COMMIT
+	// Record event types separately
 	s.Buckets[eventType][n] += 1
 	if d < s.Min[eventType] || s.N[eventType] == 0 {
 		s.Min[eventType] = d
@@ -81,7 +81,8 @@ func (s *Stats) Record(eventType byte, d int64) {
 	}
 	s.N[eventType]++
 
-	// Record for TOTAL
+	// Also record non-TOTAL events in the total stats. Since TOTAL events are
+	// recoded above, only do this for non-TOTAL events.
 	if eventType != TOTAL {
 		s.Buckets[TOTAL][n] += 1
 		if d < s.Min[TOTAL] || s.N[TOTAL] == 0 {

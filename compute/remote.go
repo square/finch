@@ -66,16 +66,16 @@ func (comp *Remote) Boot(ctx context.Context, _ config.File) error {
 	}
 	log.Printf("Tmp dir for stage files: %s", dir)
 	comp.tmpdir = dir
-	if err := comp.getTrxFiles(ctx, finch.STAGE_SETUP, cfg.Setup.Workload); err != nil {
+	if err := comp.getTrxFiles(ctx, finch.STAGE_SETUP, cfg.Setup.Trx); err != nil {
 		return err
 	}
-	if err := comp.getTrxFiles(ctx, finch.STAGE_WARMUP, cfg.Warmup.Workload); err != nil {
+	if err := comp.getTrxFiles(ctx, finch.STAGE_WARMUP, cfg.Warmup.Trx); err != nil {
 		return err
 	}
-	if err := comp.getTrxFiles(ctx, finch.STAGE_BENCHMARK, cfg.Benchmark.Workload); err != nil {
+	if err := comp.getTrxFiles(ctx, finch.STAGE_BENCHMARK, cfg.Benchmark.Trx); err != nil {
 		return err
 	}
-	if err := comp.getTrxFiles(ctx, finch.STAGE_CLEANUP, cfg.Cleanup.Workload); err != nil {
+	if err := comp.getTrxFiles(ctx, finch.STAGE_CLEANUP, cfg.Cleanup.Trx); err != nil {
 		return err
 	}
 

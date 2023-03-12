@@ -1,5 +1,5 @@
 
-DROP TABLE IF EXISTS `sbtest1`
+DROP TABLE IF EXISTS `sbtest1`;
 
 CREATE TABLE `sbtest1` (
   `id` int NOT NULL AUTO_INCREMENT,
@@ -7,4 +7,4 @@ CREATE TABLE `sbtest1` (
   `c` char(120) NOT NULL DEFAULT '',
   `pad` char(60) NOT NULL DEFAULT '',
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB
+) ENGINE=InnoDB;

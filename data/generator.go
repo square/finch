@@ -1,79 +1,89 @@
-// Copyright 2022 Block, Inc.
+// Copyright 2023 Block, Inc.
 
 package data
 
 import (
 	"fmt"
+	"math/rand"
 	"strconv"
+	"time"
+
+	"github.com/square/finch"
 )
 
 func init() {
-	Register("int-not-null", f)
+	rand.Seed(time.Now().UnixNano())
+
+	Register("rand-int", f)
 	Register("int-range", f)
-	Register("int-sequence", f)
+	Register("auto-inc", f)
+	Register("uint64-counter", f)
 	Register("project-int", f)
 	Register("str-not-null", f)
 	Register("column", f)
 	Register("xid", f)
 }
 
+// Generator generates data values for a day key (@d).
 type Generator interface {
 	Format() string
-	Copy(clientNo int) Generator
-	Values() []interface{}
+	Copy(finch.RunLevel) Generator
+	Values(finch.ExecCount) []interface{}
 	Scan(any interface{}) error
 	Id() Id
-	Scope() string
 }
 
 type Id struct {
-	DataName string // @col
-	Type     string // str-not-null
-	ClientNo int    // 1
-	CopyNo   int    // 1
-	copied   int
+	finch.RunLevel
+	Scope   string // finch.SCOPE_*
+	Type    string // str-not-null
+	DataKey string // @col
+	CopyNo  uint   // 1..N
+	copied  uint
 }
 
 func (id Id) String() string {
-	return fmt.Sprintf("%s/%s/%d/%d", id.DataName, id.Type, id.ClientNo, id.CopyNo)
+	return fmt.Sprintf("%s %s(%d)/%s %s", id.RunLevel, id.DataKey, id.CopyNo, id.Scope, id.Type)
 }
 
-func (id *Id) Copy(clientNo int) Id {
-	id.copied++
-	cp := *id
-	cp.ClientNo = clientNo
-	cp.CopyNo = id.copied
+func (id *Id) Copy(r finch.RunLevel) Id {
+	//   ^ Must take pointer so id.copied is maintained/incremented across all copies
+	id.copied++           // next CopyNo for this copy
+	cp := *id             // copy previous Id
+	cp.RunLevel = r       // set RuneLevel for this copy
+	cp.CopyNo = id.copied // set CopyNo for this copy
+
+	// If scope wasn't explicitly configured and generator didn't set its default scope,
+	// then set default statement scope to ensure Id.Scope is always set.
+	if cp.Scope == "" {
+		cp.Scope = finch.SCOPE_STATEMENT
+	}
 	return cp
 }
 
 type Factory interface {
-	Make(name, dataName string, params map[string]string) (Generator, error)
+	Make(name, dataName, scope string, params map[string]string) (Generator, error)
 }
 
 type factory struct{}
 
 var f = &factory{}
 
-func (f factory) Make(name, dataName string, params map[string]string) (Generator, error) {
+func (f factory) Make(name, dataName, scope string, params map[string]string) (Generator, error) {
 	id := Id{
-		Type:     name,
-		DataName: dataName,
+		Scope:   scope,
+		Type:    name,
+		DataKey: dataName,
 	}
 	switch name {
-	case "int-not-null":
-		max := 2147483647
-		if s, ok := params["max"]; ok {
-			n, err := strconv.Atoi(s)
-			if err != nil {
-				return nil, err
-			}
-			max = n
-		}
-		return IntNotNull{Max: max}, nil
+	case "rand-int":
+		return NewRandInt(id, params)
 	case "int-range":
 		return NewIntRange(id, params)
 	case "int-sequence":
 		return NewIntSequence(id, params)
+	case "uint64-counter":
+		return NewIncUint64(id, params), nil
 	case "str-not-null":
 		s, ok := params["len"]
 		if !ok {
@@ -85,18 +95,9 @@ func (f factory) Make(name, dataName string, params map[string]string) (Generato
 		}
 		return NewStrNotNull(id, n), nil
 	case "column":
-		return NewColumn(id, params["col"], params["type"]), nil
+		return NewColumn(id, params), nil
 	case "xid":
-		n := 1
-		s, ok := params["rows"]
-		if ok {
-			var err error
-			n, err = strconv.Atoi(s)
-			if err != nil {
-				return nil, err
-			}
-		}
-		return NewXid(id, n), nil
+		return NewXid(id), nil
 	case "project-int":
 		return NewProjectInt(id, params)
 	}
@@ -121,12 +122,12 @@ func Register(name string, f Factory) error {
 }
 
 // Make makes a data generator by name with the given generator-specific params.
-func Make(name, dataName string, params map[string]string) (Generator, error) {
+func Make(name, dataName, scope string, params map[string]string) (Generator, error) {
 	f, have := r.f[name]
 	if !have {
 		return nil, fmt.Errorf("data.Generator %s not registered", name)
 	}
-	return f.Make(name, dataName, params)
+	return f.Make(name, dataName, scope, params)
 }
 
 // --------------------------------------------------------------------------
@@ -135,7 +136,7 @@ func int64From(params map[string]string, key string, n *int64, required bool) er
 	s, ok := params[key]
 	if !ok {
 		if required {
-			return fmt.Errorf("%d required", key)
+			return fmt.Errorf("%s required", key)
 		}
 		return nil
 	}

@@ -70,11 +70,6 @@ func True(b *bool) bool {
 	return *b
 }
 
-func Bool(s string) bool {
-	v := strings.ToLower(s)
-	return v == "true" || v == "yes" || v == "enable" || v == "enabled"
-}
-
 func FileExists(filePath string) bool {
 	file, err := filepath.Abs(filePath)
 	if err != nil {

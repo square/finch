@@ -1,458 +1,284 @@
-// Copyright 2022 Block, Inc.
+// Copyright 2023 Block, Inc.
 
 package workload
 
 import (
-	"bufio"
 	"fmt"
-	"log"
-	"os"
-	"regexp"
-	"strconv"
-	"strings"
 	"time"
 
-	"github.com/dustin/go-humanize"
-
 	"github.com/square/finch"
+	"github.com/square/finch/client"
 	"github.com/square/finch/config"
 	"github.com/square/finch/data"
+	"github.com/square/finch/dbconn"
 	"github.com/square/finch/limit"
+	"github.com/square/finch/stats"
+	"github.com/square/finch/trx"
 )
 
-type Statement struct {
-	Query     string
-	ResultSet bool
-	Prepare   bool
-	Defer     bool
-	Begin     bool
-	Commit    bool
-	Write     bool
-	Idle      time.Duration
-	Data      []data.Generator
-	Values    int
-	Limit     limit.Data
-	Columns   []interface{}
-	InsertId  data.Generator
+type Allocator struct {
+	Stage      string
+	TrxSet     *trx.Set           // config.trx (this stage)
+	ExecGroups []config.ExecGroup // config.stage.workload
+	ExecMode   string             // config.stage.exec
+	StageQPS   limit.Rate         // config.stage.qps
+	StageTPS   limit.Rate         // config.stage.tps
+	DoneChan   chan error         // Stage.doneChan
+	Auto       bool               // !config.stage.disable-auto-allocation
 }
 
-type Trx struct {
-	Name       string
-	Statements []Statement
-	Data       map[string]data.Generator
-	Column     map[string]Column
-}
+func (a *Allocator) Groups() ([][]int, error) {
+	if a.Auto {
+		if len(a.ExecGroups) == 0 {
+			finch.Debug("auto alloc %s", a.Stage)
+			if a.Stage == "setup" || a.Stage == "cleanup" {
+				a.ExecGroups = make([]config.ExecGroup, len(a.TrxSet.Order))
+				for i, trxName := range a.TrxSet.Order {
+					a.ExecGroups[i] = config.ExecGroup{
+						Clients: 1,
+						Iter:    1,
+						Trx:     []string{trxName},
+					}
 
-type Column struct {
-	Statement int
-	Column    int
-	Data      data.Generator
-}
+					dataLimit := false
+					for i := range a.TrxSet.Statements[trxName] {
+						if a.TrxSet.Statements[trxName][i].Limit != nil {
+							dataLimit = true
+							break
+						}
+					}
+					if dataLimit {
+						finch.Debug("trx %s has data limit; iter=0", trxName)
+						a.ExecGroups[i].Iter = 0
+					}
+				}
+			} else { // warmup and benchmark
+				a.ExecGroups = []config.ExecGroup{
+					{
+						Clients: 1,
+						Trx:     a.TrxSet.Order,
+					},
+				}
+			}
+		} else {
+			// partial auto alloc (fill in the gaps)
+			// Ensure each trx has a client group
+			// If one doesn't, give it a default client group
+			finch.Debug("partial alloc %s: %+v", a.Stage, a.ExecGroups)
 
-var ErrEOF = fmt.Errorf("EOF")
-
-func (src Trx) ClientCopy(clientNo int) []Statement {
-
-	dstTrxData := make(map[string]data.Generator, len(src.Data))
-	for k, g := range src.Data {
-		dstTrxData[k] = g.Copy(clientNo)
-	}
-	s := make([]Statement, len(src.Statements))
-
-	for i := range src.Statements {
-		dst := src.Statements[i]
-
-		// New column copy
-		if len(src.Statements[i].Columns) > 0 {
-			dst.Columns = make([]interface{}, len(src.Statements[i].Columns))
-			for n, srcCol := range src.Statements[i].Columns {
-				if srcCol != data.Noop {
+			for i := range a.ExecGroups {
+				if len(a.ExecGroups[i].Trx) > 0 {
 					continue
 				}
-				dst.Columns[n] = srcCol
-				finch.Debug("                     stmt %2d col %2d is noop", i+1, n+1)
-			}
-		}
-
-		dst.Data = make([]data.Generator, len(src.Statements[i].Data))
-		for j, g := range src.Statements[i].Data {
-
-			switch g.Scope() {
-			case finch.SCOPE_WORKLOAD:
-				// One data gen for the whole trx, all clients, this stage
-				// @todo
-			case finch.SCOPE_TRANSACTION:
-				// One data gen for the whole trx, this client
-				dst.Data[j] = dstTrxData[g.Id().DataName]
-			default:
-				// New data gen for this statment, this client
-				dst.Data[j] = g.Copy(clientNo)
+				finch.Debug("assign all trx to exec group %d", i)
+				a.ExecGroups[i].Trx = make([]string, len(a.TrxSet.Order))
+				copy(a.ExecGroups[i].Trx, a.TrxSet.Order)
 			}
 
-			// Is this data gen a pointer to an original data.Column, then
-			// it's also in Columns in a previous statement, so go back and
-			// update that previous ref.
-			c, ok := src.Column[g.Id().DataName]
-			if !ok {
-				continue
-			}
-			finch.Debug("stmt %2d data %2d from stmt %2d col %2d: %s\n", i+1, j+1, c.Statement+1, c.Column+1, dst.Data[j].Id())
-			s[c.Statement].Columns[c.Column] = dst.Data[j]
-
-			// If statement saves insert ID, then update data gen for that too
-			if s[c.Statement].InsertId != nil {
-				s[c.Statement].InsertId = dst.Data[j]
-			}
-		}
-		s[i] = dst
-		// @todo Clone Limit
-	}
-	return s
-}
-
-func Transactions(w []config.Trx) ([]string, map[string]Trx, error) {
-	names := []string{}     // workload order
-	all := map[string]Trx{} // workload => statements
-	for i := range w {
-		trx, err := NewFile(w[i]).Load()
-		if err != nil {
-			return nil, nil, err
-		}
-		names = append(names, trx.Name)
-		all[trx.Name] = trx
-		finch.Debug("%d statements in trx %s", len(trx.Statements), w[i].Name)
-	}
-	return names, all, nil
-}
-
-type lineBuf struct {
-	n    uint
-	str  string
-	mods []string
-}
-
-type File struct {
-	lb      lineBuf
-	trx     Trx
-	cfg     config.Trx
-	colRefs map[string]int
-	dg      map[string]data.Generator
-	stmtNo  int
-}
-
-func NewFile(cfg config.Trx) *File {
-	return &File{
-		cfg: cfg,
-		trx: Trx{
-			Name:       cfg.Name,
-			Statements: []Statement{},
-			Data:       map[string]data.Generator{},
-			Column:     map[string]Column{},
-		},
-		colRefs: map[string]int{},
-		dg:      map[string]data.Generator{},
-		lb:      lineBuf{mods: []string{}},
-		stmtNo:  -1,
-	}
-}
-
-func (f *File) Load() (Trx, error) {
-	finch.Debug("loading %s", f.cfg.File)
-	file, err := os.Open(f.cfg.File)
-	if err != nil {
-		return Trx{}, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		err = f.line(strings.TrimSpace(scanner.Text()))
-		if err != nil {
-			if err == ErrEOF {
-				break
-			}
-			return Trx{}, err
-		}
-	}
-	err = f.line("") // last line
-	if err != nil {
-		return Trx{}, err
-	}
-
-	noRefs := []string{}
-	for col, refs := range f.colRefs {
-		if refs > 0 {
-			continue
-		}
-		noRefs = append(noRefs, col)
-	}
-	if len(noRefs) > 0 {
-		return Trx{}, fmt.Errorf("saved columns not referenced: %s", strings.Join(noRefs, ", "))
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Fatal(err) // shouldn't happen
-	}
-
-	return f.trx, nil
-}
-
-func (f *File) line(line string) error {
-	f.lb.n++
-
-	// More lines in statement
-	if line != "" {
-		finch.Debug("line %d: %s\n", f.lb.n, line)
-		if strings.HasPrefix(line, "-- ") {
-			if line == "-- EOF" {
-				return ErrEOF
-			}
-			f.lb.mods = append(f.lb.mods, strings.TrimPrefix(line, "--"))
-		} else {
-			f.lb.str += line + " "
-		}
-		return nil
-	}
-
-	// Empty lines between statements
-	if f.lb.str == "" {
-		finch.Debug("line %d: space", f.lb.n)
-		return nil
-	}
-
-	// End of statement
-	finch.Debug("line %d: end prev", f.lb.n)
-	s, err := f.statement()
-	if err != nil {
-		return err
-	}
-	finch.Debug("stmt: %+v", s)
-	f.trx.Statements = append(f.trx.Statements, s)
-
-	f.lb.str = ""
-	f.lb.mods = []string{}
-
-	return nil
-}
-
-var reKeyVal = regexp.MustCompile(`([\w_-]+)(?:\:\s*(\w+))?`)
-var reData = regexp.MustCompile(`@[\w_-]+`)
-var reCSV = regexp.MustCompile(`\/\*\!csv\s+(\d+)\s+(.+)\*\/`)
-var reFirstWord = regexp.MustCompile(`^(\w+)`)
-
-func (f *File) statement() (Statement, error) {
-	f.stmtNo++
-	s := Statement{}
-
-	query := strings.TrimSpace(f.lb.str)
-	finch.Debug("query raw: %s", query)
-
-	// @todo regexp to extract first word
-	com := strings.ToUpper(reFirstWord.FindString(query))
-	switch com {
-	case "SELECT":
-		s.ResultSet = true
-	case "BEGIN", "START":
-		s.Begin = true // used to rate limit trx per second (TPS) in client/client.go
-	case "COMMIT":
-		s.Commit = true // used to measure TPS rate in client/client.go
-	case "INSERT", "UPDATE", "DELETE", "REPLACE":
-		s.Write = true
-	}
-
-	for _, mod := range f.lb.mods {
-		m := strings.Fields(mod)
-		finch.Debug("mod: '%v' %#v", mod, m)
-		if len(m) < 1 {
-			return Statement{}, fmt.Errorf("invalid modifier: '%s': does not match key: value (pattern match < 2)", mod)
-		}
-		m[0] = strings.Trim(m[0], ":")
-		switch m[0] {
-		case "prepare", "prepared":
-			s.Prepare = true
-			if len(m) == 2 && strings.ToLower(m[1]) == "defer" {
-				s.Defer = true
-			}
-		case "idle":
-			d, err := time.ParseDuration(m[1])
-			if err != nil {
-				return Statement{}, fmt.Errorf("invalid idle modifier: '%s': %s", mod, err)
-			}
-			s.Idle = d
-		case "rows":
-			max, err := strconv.ParseUint(m[1], 10, 64)
-			if err != nil {
-				return Statement{}, fmt.Errorf("invalid rows limit: %s: %s", m[1], err)
-			}
-			var offset uint64
-			if len(m) == 3 {
-				offset, err = strconv.ParseUint(m[2], 10, 64)
-				if err != nil {
-					return Statement{}, fmt.Errorf("invalid rows offset: %s: %s", m[2], err)
+		TRX:
+			for _, trxName := range a.TrxSet.Order {
+				for _, execGrp := range a.ExecGroups {
+					for i := range execGrp.Trx {
+						if execGrp.Trx[i] == trxName {
+							continue TRX
+						}
+					}
 				}
-			}
-			finch.Debug("write limit: %d rows (offset %d)", max, offset)
-			s.Limit = limit.Or(s.Limit, limit.NewRows(int64(max), int64(offset)))
-		case "table-size", "database-size":
-			if len(m) != 3 {
-				return Statement{}, fmt.Errorf("invalid %s modifier: split %d fields, expected 3: %s", m[0], len(m), mod)
-			}
-			max, err := humanize.ParseBytes(m[2])
-			if err != nil {
-				return Statement{}, err
-			}
-			var lm limit.Data
-			if m[0] == "table-size" {
-				lm = limit.NewSize(max, m[2], "", m[1])
-			} else { // database-size
-				lm = limit.NewSize(max, m[2], m[1], "")
-			}
-			s.Limit = limit.Or(s.Limit, lm)
-
-		case "save-insert-id":
-			// @todo check len(m)
-			if s.ResultSet {
-				return Statement{}, fmt.Errorf("save-insert-id not allowed on SELECT")
-			}
-			finch.Debug("save-insert-id")
-			g, err := f.column(0, m[1])
-			if err != nil {
-				return Statement{}, err
-			}
-			s.InsertId = g
-			s.Columns = []interface{}{g}
-		case "save-result", "save-results":
-			// @todo check len(m)
-			s.Columns = make([]interface{}, len(m[1:]))
-			for i, colAndType := range m[1:] {
-				// @todo split csv (handle "col1,col2" instead of "col1, col2")
-				g, err := f.column(i, colAndType)
-				if err != nil {
-					return Statement{}, err
+				// Not assigned, so assign it
+				execGrp := config.ExecGroup{
+					Clients: 1,
+					Trx:     []string{trxName},
 				}
-				s.Columns[i] = g
-			}
-		default:
-			return s, fmt.Errorf("unknown modifier: %s: '%s'", m[0], mod)
-		}
-	}
-
-	// Expand CSV /*!csv N val*/
-	m := reCSV.FindStringSubmatch(query)
-	if len(m) > 0 {
-		n, err := strconv.ParseInt(m[1], 10, 32)
-		if err != nil {
-			return s, fmt.Errorf("invalid number of CSV values in %s: %s", m[0], err)
-		}
-		vals := make([]string, n)
-		val := strings.TrimSpace(m[2])
-		finch.Debug("%dx %s", n, val)
-		for i := int64(0); i < n; i++ {
-			vals[i] = val
-		}
-		csv := strings.Join(vals, ", ")
-		query = reCSV.ReplaceAllLiteralString(query, csv)
-	}
-
-	// Data geneartors (@x in "WHERE col = @x")
-	dataNames := reData.FindAllString(query, -1)
-	finch.Debug("data names: %v", dataNames)
-	if len(dataNames) == 0 {
-		s.Query = query
-		return s, nil
-	}
-
-	s.Values = len(dataNames)          // a value for every @data
-	s.Data = []data.Generator{}        // len(s.Data) can be < s.Values due to @PREV
-	dataFormats := map[string]string{} // keyed on data name
-	for i, name := range dataNames {
-		var g data.Generator
-		var err error
-		if c, ok := f.trx.Column[name]; ok {
-			finch.Debug("stmt %d %s uses saved col %s from stmt %d col %d", f.stmtNo+1, name, c.Data.Id(), c.Statement+1, c.Column+1)
-			f.colRefs[name]++
-			g = c.Data
-			s.Data = append(s.Data, g)
-		} else if name == "@PREV" {
-			if i == 0 {
-				return s, fmt.Errorf("no @PREV data generator")
-			}
-			g = f.dg[dataNames[i-1]]
-			finch.Debug("@PREV = %s: %s", dataNames[i-1], g.Id())
-		} else {
-			g, ok = f.dg[name]
-			if !ok {
-				d, ok := f.cfg.Data[strings.TrimPrefix(name, "@")] // config.stage.workload.*.data
-				if !ok {
-					return s, fmt.Errorf("no params for data name %s", name)
+				if a.Stage == "setup" || a.Stage == "cleanup" {
+					execGrp.Iter = 1
 				}
-				finch.Debug("make data generator %s for %s", d.Generator, name)
-				g, err = data.Make(d.Generator, name, d.Params)
-				if err != nil {
-					return s, err
-				}
-				f.dg[name] = g
-				if g.Scope() == finch.SCOPE_TRANSACTION {
-					finch.Debug("%s trx scoped", g.Id())
-					f.trx.Data[g.Id().DataName] = g
-				}
+				a.ExecGroups = append(a.ExecGroups, execGrp)
+				finch.Debug("created exec group %d for %s", len(a.ExecGroups)-1, trxName)
 			}
-			s.Data = append(s.Data, g)
-		}
-		if s.Prepare {
-			dataFormats[name] = "?"
-		} else {
-			dataFormats[name] = g.Format()
 		}
 	}
+	for i := range a.ExecGroups {
+		if a.ExecGroups[i].Name == "" {
+			a.ExecGroups[i].Name = fmt.Sprintf("e%d", i+1)
+		}
+		finch.Debug("%3d exec group: %+v", i, a.ExecGroups[i])
+	}
 
-	replacements := make([]string, len(dataFormats)*2) // *2 because key + value
-	i := 0
-	for k, v := range dataFormats {
-		replacements[i] = k
-		replacements[i+1] = v
-		i += 2
-	}
-	finch.Debug("replacements: %v", replacements)
-	r := strings.NewReplacer(replacements...)
-	s.Query = r.Replace(query)
-	// Caller debug prints full Statement
-	return s, nil
-}
-
-func (f *File) column(colNo int, colAndType string) (data.Generator, error) {
-	colAndType = strings.TrimSpace(strings.TrimSuffix(colAndType, ","))
-	if colAndType == "_" {
-		return data.Noop, nil
-	}
-	p := strings.Split(colAndType, ":") // col:type
-	col := p[0]
-	if _, ok := f.trx.Column[col]; ok {
-		return nil, fmt.Errorf("duplicated saved column: %s", col)
-	}
-	t := "n" // default: numeric column, format %d
-	if len(p) == 2 {
-		t = p[1]
-	}
-	var colFmt string // column format: %d or '%s'
-	colType := strings.TrimSuffix(t, ",")
-	switch colType {
-	case "n":
-	case "s":
+	var groups [][]int
+	switch a.ExecMode {
+	case finch.EXEC_SEQUENTIAL:
+		// exec group "name" -> N clients (grouped by exec group name)
+		groups = [][]int{}
+		groupNo := -1
+		groupName := ""
+		for i := range a.ExecGroups {
+			if a.ExecGroups[i].Name != groupName {
+				// New group
+				groups = append(groups, []int{})
+				groupNo++
+				groupName = a.ExecGroups[i].Name
+			}
+			groups[groupNo] = append(groups[groupNo], i)
+		}
+		finch.Debug("exec groups: %+v", groups)
+	case finch.EXEC_CONCURRENT:
+		// 1 exec group -> all clients
+		groups = make([][]int, 1)
+		groups[0] = make([]int, len(a.ExecGroups))
+		for j := range a.ExecGroups {
+			groups[0][j] = j
+		}
 	default:
-		return nil, fmt.Errorf("invalid column type: %s: valid types: n, s", t)
+		// Shouldn't happen because config should have already been validated
+		panic("invalid config.exec: " + a.ExecMode)
 	}
-	g, err := data.Make("column", col, map[string]string{"col": col, "type": colType})
-	if err != nil {
-		return nil, err
+
+	return groups, nil
+}
+
+func (a *Allocator) Clients(groups [][]int) ([][]*client.Client, error) {
+	clients := make([][]*client.Client, len(groups))
+	runlevel := &finch.RunLevel{
+		Stage:         a.Stage,
+		ExecGroup:     0,
+		ExecGroupName: "",
+		ClientGroup:   0,
+		Client:        0,
+		Trx:           0,
+		TrxName:       "",
+		Query:         0,
 	}
-	f.colRefs[col] = 0
-	f.trx.Column[col] = Column{
-		Statement: f.stmtNo,
-		Column:    colNo,
-		Data:      g,
-	}
-	f.trx.Data[g.Id().DataName] = g // data.Column are trx scoped
-	finch.Debug("saved col %s %s", col, colFmt)
-	return g, nil
+
+	var qps, tps limit.Rate
+
+	for i := range groups {
+		clients[i] = []*client.Client{}
+		runlevel.ExecGroup = uint(i + 1)
+		runlevel.ExecGroupName = a.ExecGroups[groups[i][0]].Name
+
+		var execGroupIterPtr uint32
+
+		for cgNo, j := range groups[i] { // client group
+			runlevel.ClientGroup = uint(cgNo + 1)
+
+			if j == 0 {
+				qps = limit.And(a.StageQPS, limit.NewRate(a.ExecGroups[j].QPSExecGroup))
+				tps = limit.And(a.StageTPS, limit.NewRate(a.ExecGroups[j].TPSExecGroup))
+			}
+
+			var clientsIterPtr uint32
+
+			qps = limit.And(qps, limit.NewRate(a.ExecGroups[j].QPSClients))
+			tps = limit.And(tps, limit.NewRate(a.ExecGroups[j].TPSClients))
+
+			for n := uint(0); n < a.ExecGroups[j].Clients; n++ { // client
+				runlevel.Client = n + 1
+
+				// Make a new sql.DB and sql.Conn for this client. Yes, sql.DB are meant
+				// to be shared, but this is a benchmark tool and each client is meant to be
+				// isolated. So we duplicate per client so there's zero chance of one client
+				// affecting another via a shared sql.DB. The connection to MySQL was already
+				// tested in compute/Instance.Boot, so these should not error.
+				db, _, err := dbconn.Make()
+				if err != nil {
+					return nil, err
+				}
+
+				runtime, _ := time.ParseDuration(a.ExecGroups[j].Runtime) // already validated
+
+				c := &client.Client{
+					RunLevel: *runlevel, // copy
+					DB:       db,
+					Iter:     a.ExecGroups[j].Iter,
+					Runtime:  runtime,
+					DoneChan: a.DoneChan,
+				}
+				if a.Stage == "benchmark" {
+					c.Stats = stats.NewStats()
+				}
+
+				// Set combined limits, if any: iterations, QPS, TPS
+				if a.ExecGroups[j].IterClients > 0 {
+					c.IterClients = a.ExecGroups[j].IterClients
+					c.IterClientsPtr = &clientsIterPtr
+				}
+				if a.ExecGroups[j].IterExecGroup > 0 {
+					c.IterExecGroup = a.ExecGroups[j].IterExecGroup
+					c.IterExecGroupPtr = &execGroupIterPtr
+				}
+				if qps = limit.And(qps, limit.NewRate(a.ExecGroups[j].QPS)); qps != nil {
+					c.QPS = qps.Allow()
+				}
+				if tps = limit.And(tps, limit.NewRate(a.ExecGroups[j].TPS)); tps != nil {
+					c.TPS = tps.Allow()
+				}
+
+				// Copy statements from transactions assigned to this client,
+				// which can be a subset of all trx (config.stage.trx) and in
+				// a differnet order
+				n := 0
+				for _, trxName := range a.ExecGroups[j].Trx {
+					n += len(a.TrxSet.Statements[trxName])
+				}
+				c.Statements = make([]*trx.Statement, n)
+				c.Data = make([]trx.Data, n)
+
+				n = 0
+				for _, trxName := range a.ExecGroups[j].Trx {
+					runlevel.Trx += 1
+					runlevel.TrxName = trxName
+					runlevel.Query = 0
+					c.Data[n].TrxBoundary |= finch.TRX_BEGIN // finch trx file, not MySQL trx
+					for _, stmt := range a.TrxSet.Statements[trxName] {
+						runlevel.Query += 1
+						finch.Debug("--- %s", runlevel)
+						c.Statements[n] = stmt // *Statement assigment; don't modify
+
+						if len(stmt.Inputs) > 0 {
+							c.Data[n].Inputs = []data.Generator{}
+							for _, dataKey := range stmt.Inputs {
+								if g := a.TrxSet.Data.Copy(dataKey, *runlevel); g != nil {
+									c.Data[n].Inputs = append(c.Data[n].Inputs, g)
+									if a.TrxSet.Data.Keys[dataKey].Column >= 0 {
+										finch.Debug("    input %s <- %s", g.Id().String(), a.TrxSet.Data.Keys[dataKey])
+									} else {
+										finch.Debug("    input %s", g.Id().String())
+									}
+								}
+							}
+						}
+
+						if len(stmt.Outputs) > 0 {
+							// For every output (saved column), there's a data generator
+							// that accepts the value from the query (output) then acts
+							// as the input to another query.
+							c.Data[n].Outputs = make([]interface{}, len(stmt.Outputs))
+							for i, dataKey := range stmt.Outputs {
+								if dataKey == stmt.InsertId {
+									continue
+								}
+								if g := a.TrxSet.Data.Copy(dataKey, *runlevel); g != nil {
+									c.Data[n].Outputs[i] = g
+									finch.Debug("    output %s", g.Id().String())
+								}
+							}
+						}
+
+						if stmt.InsertId != "" {
+							g := a.TrxSet.Data.Copy(stmt.InsertId, *runlevel)
+							c.Data[n].InsertId = g
+							finch.Debug("    insert-id %s", g.Id().String())
+						}
+
+						n++
+					} // query
+					c.Data[n-1].TrxBoundary |= finch.TRX_END // finch trx file, not MySQL trx
+				} // trx
+
+				clients[i] = append(clients[i], c)
+			} // client
+		} // client group
+	} // exec group
+
+	return clients, nil
 }

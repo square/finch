@@ -54,14 +54,15 @@ func (c *File) Validate() error {
 // --------------------------------------------------------------------------
 
 type Stage struct {
-	Name     string
-	Clients  []ClientGroup `yaml:"clients,omitempty"`
-	Runtime  string        `yaml:"runtime,omitempty"`
-	Sequence string        `yaml:"sequence,omitempty"`
-	Script   string        `yaml:"script,omitempty"`
-	Workload []Trx         `yaml:"workload,omitempty"`
-	QPS      uint64        `yaml:"qps,omitempty"`
-	TPS      uint64        `yaml:"tps,omitempty"`
+	Name    string
+	Runtime string `yaml:"runtime,omitempty"`
+	Script  string `yaml:"script,omitempty"`
+	QPS     uint   `yaml:"qps,omitempty"`
+	TPS     uint   `yaml:"tps,omitempty"`
+
+	Exec     string      `yaml:"exec,omitempty"`
+	Workload []ExecGroup `yaml:"workload,omitempty"`
+	Trx      []Trx       `yaml:"trx,omitempty"`
 
 	Disable               bool `yaml:"disable"`
 	DisableAutoAllocation bool `yaml:"disable-auto-allocation,omitempty"`
@@ -79,29 +80,29 @@ func (c *Stage) Validate(name string) error {
 		return nil
 	}
 
-	// Workload: must validate before Clients because Clients reference trx sets by nameo
-	for i := range c.Workload {
-		if c.Workload[i].File == "" {
-			return fmt.Errorf("no file specified for workload transaction set %d", i)
+	// Trx list: must validate before Workload because Workload reference trx by name
+	for i := range c.Trx {
+		if c.Trx[i].File == "" {
+			return fmt.Errorf("no file specified for trx %d", i+1)
 		}
-		if !FileExists(c.Workload[i].File) {
-			return fmt.Errorf("workload transaction set %d file %s does not exist", i, c.Workload[i].File)
+		if !FileExists(c.Trx[i].File) {
+			return fmt.Errorf("trx %d file %s does not exist", i+1, c.Trx[i].File)
 		}
-		if c.Workload[i].Name == "" {
-			c.Workload[i].Name = filepath.Base(c.Workload[i].File)
+		if c.Trx[i].Name == "" {
+			c.Trx[i].Name = filepath.Base(c.Trx[i].File)
 		}
 	}
 
-	// Clients
-	if len(c.Clients) > 0 {
-		for i := range c.Clients {
-			if err := c.Clients[i].Validate(c.Workload); err != nil {
+	// Workload
+	if len(c.Workload) > 0 {
+		for i := range c.Workload {
+			if err := c.Workload[i].Validate(c.Trx); err != nil {
 				return err
 			}
 		CLIENT_TRX:
-			for _, name := range c.Clients[i].Transactions {
-				for i := range c.Workload {
-					if c.Workload[i].Name == name {
+			for _, name := range c.Workload[i].Trx {
+				for i := range c.Trx {
+					if c.Trx[i].Name == name {
 						continue CLIENT_TRX
 					}
 				}
@@ -115,19 +116,18 @@ func (c *Stage) Validate(name string) error {
 		return err
 	}
 
-	// Sequence
-	switch c.Sequence {
-	case "client": // alt value
-		c.Sequence = "clients" // normalize
-	case "clients":
-	case "workload":
-	case "":
-		// Auto-set
+	// Exec
+	switch c.Exec {
+	case "sequential":
+	case "concurrenct":
+	case "": // Auto-set
 		if c.Name == "setup" || c.Name == "cleanup" {
-			c.Sequence = "workload"
+			c.Exec = "sequential"
+		} else {
+			c.Exec = "concurrent"
 		}
 	default:
-		return fmt.Errorf("invalid sequence: %s (valid values: clients, workload)", c.Sequence)
+		return fmt.Errorf("invalid exec: %s (valid values: sequential, concurrent)", c.Exec)
 	}
 
 	// Script
@@ -139,37 +139,36 @@ func (c *Stage) Validate(name string) error {
 type Data struct {
 	Name      string            `yaml:"name"`      // @id
 	Generator string            `yaml:"generator"` // data.Generator type
-	Params    map[string]string `yaml:"params"`    // Generator-specific params
+	Scope     string            `yaml:"scope"`
+	DataType  string            `yaml:"data-type"`
+	Params    map[string]string `yaml:"params"` // Generator-specific params
 }
 
-type ClientGroup struct {
-	N            uint     `yaml:"n,omitempty"`
-	Transactions []string `yaml:"transactions,omitempty"`
-	Runtime      string   `yaml:"runtime,omitempty"`
-	Iterations   uint64   `yaml:"iterations,omitempty"`
-	QPS          uint64   `yaml:"qps,omitempty"`
-	TPS          uint64   `yaml:"tps,omitempty"`
+type ExecGroup struct {
+	Clients       uint     `yaml:"clients,omitempty"`
+	Db            string   `yaml:"db,omitempty"`
+	Iter          uint     `yaml:"iter,omitempty"`
+	IterClients   uint32   `yaml:"iter-clients,omitempty"`
+	IterExecGroup uint32   `yaml:"iter-exec-group,omitempty"`
+	Name          string   `yaml:"name,omitempty"`
+	QPS           uint     `yaml:"qps,omitempty"`
+	QPSClients    uint     `yaml:"qps-clients,omitempty"`
+	QPSExecGroup  uint     `yaml:"qps-exec-group,omitempty"`
+	Runtime       string   `yaml:"runtime,omitempty"`
+	TPS           uint     `yaml:"tps,omitempty"`
+	TPSClients    uint     `yaml:"tps-clients,omitempty"`
+	TPSExecGroup  uint     `yaml:"tps-exec-group,omitempty"`
+	Trx           []string `yaml:"trx,omitempty"`
 }
 
-func (c *ClientGroup) Validate(w []Trx) error {
-	if c.N == 0 {
-		c.N = 1
+func (c *ExecGroup) Validate(w []Trx) error {
+	if c.Clients == 0 {
+		c.Clients = 1
 	}
-	if err := ValidFreq(c.Runtime, "workload.clients"); err != nil {
+	if err := ValidFreq(c.Runtime, "workload.runtime"); err != nil {
 		return err
 	}
-	if len(c.Transactions) == 0 {
-		names := make([]string, len(w))
-		for i := range w {
-			names[i] = w[i].Name
-		}
-		c.Transactions = names
-	}
 	return nil
-}
-
-func (cg ClientGroup) Name() string {
-	return strings.Join(cg.Transactions, ",")
 }
 
 // --------------------------------------------------------------------------
