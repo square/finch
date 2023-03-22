@@ -3,12 +3,35 @@
 package stats_test
 
 import (
+	"math/rand"
 	"testing"
 
 	"github.com/go-test/deep"
 
 	"github.com/square/finch/stats"
 )
+
+func Benchmark_Trx(b *testing.B) {
+	// To confirm zero allocations:
+	// go test -bench=. -benchmem -memprofile mem.out -cpuprofile cpu.out
+	s := stats.NewTrx("t1")
+	max := 1000
+	v := make([]int64, max)
+	for i := 0; i < max; i++ {
+		v[i] = rand.Int63n(999999)
+	}
+	j := 0
+	for n := 0; n < b.N; n++ {
+		if (n+1)%100 == 0 {
+			s.Swap()
+		}
+		s.Record(stats.READ, v[j])
+		j += 1
+		if j == max {
+			j = 0
+		}
+	}
+}
 
 func TestBasicStats(t *testing.T) {
 	s := stats.NewStats()
