@@ -192,9 +192,7 @@ func (a *Allocator) Clients(groups [][]int) ([][]*client.Client, error) {
 					Iter:     a.ExecGroups[j].Iter,
 					Runtime:  runtime,
 					DoneChan: a.DoneChan,
-				}
-				if a.Stage == "benchmark" {
-					c.Stats = stats.NewStats()
+					Stats:    make([]*stats.Trx, len(a.ExecGroups[j].Trx)), // stats per trx
 				}
 
 				// Set combined limits, if any: iterations, QPS, TPS
@@ -224,11 +222,14 @@ func (a *Allocator) Clients(groups [][]int) ([][]*client.Client, error) {
 				c.Data = make([]trx.Data, n)
 
 				n = 0
-				for _, trxName := range a.ExecGroups[j].Trx {
+				for trxNo, trxName := range a.ExecGroups[j].Trx {
 					runlevel.Trx += 1
 					runlevel.TrxName = trxName
 					runlevel.Query = 0
 					c.Data[n].TrxBoundary |= finch.TRX_BEGIN // finch trx file, not MySQL trx
+					if a.Stage == "benchmark" {
+						c.Stats[trxNo] = stats.NewTrx(trxName)
+					}
 					for _, stmt := range a.TrxSet.Statements[trxName] {
 						runlevel.Query += 1
 						finch.Debug("--- %s", runlevel)

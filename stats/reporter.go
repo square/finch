@@ -19,7 +19,7 @@ var DefaultPercentiles = []float64{99.9}
 var DefaultPercentileNames = []string{"P999"}
 
 type Reporter interface {
-	Report([]Stats)
+	Report(from []Instance)
 	Stop()
 }
 

@@ -21,7 +21,7 @@ type Client struct {
 	RunLevel         finch.RunLevel
 	Statements       []*trx.Statement
 	Data             []trx.Data
-	Stats            *stats.Stats `deep:"-"`
+	Stats            []*stats.Trx `deep:"-"`
 	TrxBoundary      []byte       `deep:"-"`
 	DB               *sql.DB      `deep:"-"`
 	Runtime          time.Duration
@@ -142,7 +142,7 @@ func (c *Client) Run(ctxStage context.Context) {
 
 	c.connect(ctxRun, nil)
 
-	// Deferred prepare, rquired when db/table does exist yet
+	// Deferred prepare, required when db/table does exist yet
 	for i, s := range c.Statements {
 		if !s.Prepare || c.ps[i] != nil {
 			continue
@@ -164,9 +164,11 @@ func (c *Client) Run(ctxStage context.Context) {
 	cnt[finch.EXEC_GROUP] = c.RunLevel.ExecGroup
 	cnt[finch.CLIENT_GROUP] = c.RunLevel.ClientGroup
 
-	if c.Stats != nil {
-		c.Stats.Reset() // sets begin=NOW()
-	}
+	// trxNo indexes into c.Stats and resets to 0 on each iteration. Remember:
+	// these are finch trx (files), not MySQL trx, so trx boundaries mark the
+	// beginning and end of a finch trx (file). User is expected to make finch
+	// trx boundaries meaningful.
+	trxNo := -1
 
 	//
 	// CRITICAL LOOP: no debug or superfluous function calls
@@ -183,6 +185,7 @@ ITER:
 			return
 		}
 		cnt[finch.ITER] += 1
+		trxNo = -1
 
 		for i := range c.Statements {
 			// Idle time
@@ -198,6 +201,7 @@ ITER:
 			// "trx" is a trx file in the config assigned to this client.
 			if c.Data[i].TrxBoundary&finch.TRX_BEGIN == 1 {
 				cnt[finch.TRX] += 1
+				trxNo += 1
 			}
 
 			// Generate new data values for this query. A single data generator
@@ -226,8 +230,8 @@ ITER:
 				} else {
 					rows, err = c.conn.QueryContext(ctxRun, fmt.Sprintf(c.Statements[i].Query, c.values[i]...))
 				}
-				if c.Stats != nil {
-					c.Stats.Record(stats.READ, time.Now().Sub(t).Microseconds())
+				if c.Stats[trxNo] != nil {
+					c.Stats[trxNo].Record(stats.READ, time.Now().Sub(t).Microseconds())
 				}
 				if err != nil {
 					err = fmt.Errorf("querying %s: %w", c.Statements[i].Query, err)
@@ -262,16 +266,16 @@ ITER:
 				} else {
 					res, err = c.conn.ExecContext(ctxRun, fmt.Sprintf(c.Statements[i].Query, c.values[i]...))
 				}
-				if c.Stats != nil {
+				if c.Stats[trxNo] != nil {
 					switch {
 					case c.Statements[i].Write:
-						c.Stats.Record(stats.WRITE, time.Now().Sub(t).Microseconds())
+						c.Stats[trxNo].Record(stats.WRITE, time.Now().Sub(t).Microseconds())
 					case c.Statements[i].Commit:
-						c.Stats.Record(stats.COMMIT, time.Now().Sub(t).Microseconds())
+						c.Stats[trxNo].Record(stats.COMMIT, time.Now().Sub(t).Microseconds())
 					default:
 						// BEGIN, SET, and other statements that aren't reads or writes
 						// but count and response time will be included in total
-						c.Stats.Record(stats.TOTAL, time.Now().Sub(t).Microseconds())
+						c.Stats[trxNo].Record(stats.TOTAL, time.Now().Sub(t).Microseconds())
 					}
 				}
 				if err != nil {

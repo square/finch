@@ -7,8 +7,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
+	"sync/atomic"
 )
 
 var nEventTypes = 4 // number of event types:
@@ -20,19 +19,18 @@ const (
 	TOTAL
 )
 
+// Stats are lock-free basic statistics: query count (N), min and max response time,
+// and response time distribution and percentiles using the same histogram bucketes
+// as MySQL 8.0. All times are microseconds.
+//
+// Finch calculates stats per-client and per-trx (Finch trx file, not MySQL trx).
+// If there are 8 clients running 2 trx, then there are 16 instances of Stats
+// which is half of the lock-free design. The other half is Trx.
 type Stats struct {
-	*sync.Mutex
-	Begin    time.Time  // start of interval
-	Buckets  [][]uint64 // response time (μs) for percentiles
-	Clients  int        // number of clients, set by Collector
-	Compute  string     // "local" or remote name, set by Collector
-	End      time.Time  // end of interval
-	Interval uint       // interval number, monotonically inc, set by Collector
-	Min      []int64    // response time (μs)
-	Max      []int64    // response time (μs)
-	N        []uint64   // number of events (queries)
-	Runtime  uint       // total elapsed time of benchmark, set by Collector
-	Seconds  float64    // of interval
+	Buckets [][]uint64 // response time (μs) for percentiles
+	Min     []int64    // response time (μs)
+	Max     []int64    // response time (μs)
+	N       []uint64   // number of events (queries)
 }
 
 func NewStats() *Stats {
@@ -42,8 +40,6 @@ func NewStats() *Stats {
 		buckets[i] = make([]uint64, n_buckets)
 	}
 	return &Stats{
-		Mutex:   &sync.Mutex{},
-		Begin:   time.Now(),
 		Buckets: buckets,
 		Min:     make([]int64, nEventTypes),
 		Max:     make([]int64, nEventTypes),
@@ -69,8 +65,6 @@ func (s *Stats) Record(eventType byte, d int64) {
 		n = n_buckets - 1
 	}
 
-	s.Lock()
-
 	// Record event types separately
 	s.Buckets[eventType][n] += 1
 	if d < s.Min[eventType] || s.N[eventType] == 0 {
@@ -93,8 +87,6 @@ func (s *Stats) Record(eventType byte, d int64) {
 		}
 		s.N[TOTAL]++
 	}
-
-	s.Unlock()
 }
 
 func (s *Stats) Reset() {
@@ -106,61 +98,23 @@ func (s *Stats) Reset() {
 		s.Max[i] = 0
 		s.N[i] = 0
 	}
-	s.Seconds = 0
-	s.Begin = time.Now()
 }
 
-// Snapshot returns a copy of the current stats and resets all values.
-func (s *Stats) Snapshot() Stats {
-	now := time.Now()
-	s.Lock()
-	snapshot := s.Copy()
-	snapshot.End = now
-	s.Reset()
-	s.Unlock()
-	return snapshot
-}
-
-func (s *Stats) Copy() Stats {
-	// MUST COPY to combine because Go slices are refs
-	buckets := make([][]uint64, nEventTypes)
-	min := make([]int64, nEventTypes)
-	max := make([]int64, nEventTypes)
-	n := make([]uint64, nEventTypes)
+// Copy copies all stats to dst, overwriting all values in dst.
+func (s *Stats) Copy(dst *Stats) {
 	for i := 0; i < nEventTypes; i++ {
-		buckets[i] = make([]uint64, n_buckets)
-		copy(buckets[i], s.Buckets[i])
-		min[i] = s.Min[i]
-		max[i] = s.Max[i]
-		n[i] = s.N[i]
+		copy(dst.Buckets[i], s.Buckets[i])
+		dst.Min[i] = s.Min[i]
+		dst.Max[i] = s.Max[i]
+		dst.N[i] = s.N[i]
 	}
-	snapshot := Stats{
-		Begin:    s.Begin,
-		Buckets:  buckets,
-		Clients:  s.Clients,
-		Compute:  s.Compute,
-		End:      s.End,
-		Interval: s.Interval,
-		Min:      min,
-		Max:      max,
-		N:        n,
-		Runtime:  s.Runtime,
-		Seconds:  s.End.Sub(s.Begin).Seconds(),
-	}
-	return snapshot
 }
 
-// Combine combines reported stats.
-func (s *Stats) Combine(c Stats) {
+// Combine combines all stats from c. All values in s are adjusted with respect
+// to c. For example, of c.Min < s.Min, then s.Min = c.Min. s is modified, but c
+// is not. This is used to create total stats in the Collector and reporters.
+func (s *Stats) Combine(c *Stats) {
 	for i := 0; i < nEventTypes; i++ {
-		if c.Begin.Before(s.Begin) || s.N[i] == 0 {
-			s.Begin = c.Begin
-			s.Seconds = s.End.Sub(s.Begin).Seconds()
-		}
-		if c.End.After(s.End) || s.N[i] == 0 {
-			s.End = c.End
-			s.Seconds = s.End.Sub(s.Begin).Seconds()
-		}
 		for j := range s.Buckets[i] {
 			s.Buckets[i][j] += c.Buckets[i][j]
 		}
@@ -172,7 +126,6 @@ func (s *Stats) Combine(c Stats) {
 		}
 		s.N[i] += c.N[i]
 	}
-	s.Clients += c.Clients
 }
 
 func (s Stats) Percentiles(eventType byte, p []float64) (q []uint64) {
@@ -238,6 +191,56 @@ func ParsePercentiles(pCSV string) ([]string, []float64, error) {
 		p = append(p, f)        // 99.0 (float)
 	}
 	return s, p, nil
+}
+
+// --------------------------------------------------------------------------
+
+// Trx is lock-free stats for one trx file by one client. It contains 2 pre-allocated
+// Stats struct called "a" and "b": one active, one reporting. A Client records
+// to the active stats. When the Collector is ready to collect stats, it calls
+// Swap, and Trx atomically swaps "a" and "b". If, for example, "a" was active,
+// then it's returned to the Collector for reporting, and "b" is made active for
+// on-going stats recording by the Client. This is the other half of the lock-free
+// Stats design.
+type Trx struct {
+	Name string
+	a    *Stats
+	b    *Stats
+	sp   atomic.Pointer[Stats]
+	onA  bool
+}
+
+func NewTrx(name string) *Trx {
+	a := NewStats()
+	b := NewStats()
+	sp := atomic.Pointer[Stats]{}
+	sp.Store(a)
+	return &Trx{
+		Name: name,
+		sp:   sp,
+		a:    a,
+		b:    b,
+		onA:  true,
+	}
+}
+
+func (t *Trx) Record(eventType byte, d int64) {
+	t.sp.Load().Record(eventType, d)
+}
+
+func (t *Trx) Swap() *Stats {
+	// on A; switch to B
+	if t.onA {
+		t.b.Reset()
+		t.sp.Store(t.b)
+		t.onA = false
+		return t.a
+	}
+	// on B; switch to A
+	t.a.Reset()
+	t.sp.Store(t.a)
+	t.onA = true
+	return t.b
 }
 
 /*

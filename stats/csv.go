@@ -13,8 +13,9 @@ import (
 // CSV is a Reporter that prints stats to STDOUT. This is the default when
 // config.stats is not set.
 type CSV struct {
-	file *os.File
-	p    []float64
+	file  *os.File
+	p     []float64
+	total *Stats
 }
 
 var _ Reporter = CSV{}
@@ -50,62 +51,66 @@ func NewCSV(opts map[string]string) (CSV, error) {
 	fmt.Fprintln(f)
 
 	r := CSV{
-		file: f,
-		p:    nP,
+		file:  f,
+		p:     nP,
+		total: NewStats(),
 	}
 	return r, nil
 }
 
-func (r CSV) Report(stats []Stats) {
-	total := stats[0].Copy() // copy to avoid reporters modifying vals via slice ref
-	for i := range stats[1:] {
-		total.Combine(stats[1+i])
+func (r CSV) Report(from []Instance) {
+	from[0].Total.Copy(r.total)
+	clients := from[0].Clients
+	for i := range from[1:] {
+		r.total.Combine(from[1+i].Total)
+		clients += from[1+1].Clients
 	}
-	if len(stats) > 1 {
-		total.Compute = fmt.Sprintf("%d combined", len(stats))
+	compute := from[0].Hostname
+	if len(from) > 1 {
+		compute = fmt.Sprintf("%d combined", len(from))
 	}
 
 	// Fill in the line with values except the P percentile values, which is done below
 	// because there's a variable number of them
 	line := fmt.Sprintf(Fmt,
-		total.Interval,
-		total.Seconds, // duration (of interval)
-		total.Runtime,
-		total.Clients,
+		from[0].Interval,
+		from[0].Seconds, // duration (of interval)
+		from[0].Runtime,
+		clients,
 
 		// TOTAL
-		int64(float64(total.N[TOTAL])/total.Seconds), // QPS
-		total.Min[TOTAL],
+		int64(float64(r.total.N[TOTAL])/from[0].Seconds), // QPS
+		r.total.Min[TOTAL],
 		// P
-		total.Max[TOTAL],
+		r.total.Max[TOTAL],
 
 		// READ
-		int64(float64(total.N[READ])/total.Seconds),
-		total.Min[READ],
+		int64(float64(r.total.N[READ])/from[0].Seconds),
+		r.total.Min[READ],
 		// P
-		total.Max[READ],
+		r.total.Max[READ],
 
 		// WRITE
-		int64(float64(total.N[WRITE])/total.Seconds),
-		total.Min[WRITE],
+		int64(float64(r.total.N[WRITE])/from[0].Seconds),
+		r.total.Min[WRITE],
 		// P
-		total.Max[WRITE],
+		r.total.Max[WRITE],
 
 		// COMMIT
-		int64(float64(total.N[COMMIT])/total.Seconds), // TPS
-		total.Min[COMMIT],
+		int64(float64(r.total.N[COMMIT])/from[0].Seconds), // TPS
+		r.total.Min[COMMIT],
 		// P
-		total.Max[COMMIT],
+		r.total.Max[COMMIT],
 
 		// Compute (hostname)
-		total.Compute,
+		compute,
 	)
 
 	// Replace P in Fmt with the CSV percentile values
-	line = strings.Replace(line, "P", intsToString(total.Percentiles(TOTAL, r.p), ",", false), 1)
-	line = strings.Replace(line, "P", intsToString(total.Percentiles(READ, r.p), ",", false), 1)
-	line = strings.Replace(line, "P", intsToString(total.Percentiles(WRITE, r.p), ",", false), 1)
-	line = strings.Replace(line, "P", intsToString(total.Percentiles(COMMIT, r.p), ",", false), 1)
+	line = strings.Replace(line, "P", intsToString(r.total.Percentiles(TOTAL, r.p), ",", false), 1)
+	line = strings.Replace(line, "P", intsToString(r.total.Percentiles(READ, r.p), ",", false), 1)
+	line = strings.Replace(line, "P", intsToString(r.total.Percentiles(WRITE, r.p), ",", false), 1)
+	line = strings.Replace(line, "P", intsToString(r.total.Percentiles(COMMIT, r.p), ",", false), 1)
 
 	fmt.Fprintln(r.file, line)
 }

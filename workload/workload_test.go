@@ -107,6 +107,7 @@ func TestGroups_SetupOne(t *testing.T) {
 				Iter:     1,
 				Statements: []*trx.Statement{
 					{
+						Trx:       "001.sql",
 						Query:     "select c from t where id=%d",
 						ResultSet: true,
 						Inputs:    []string{"@id"},
@@ -127,7 +128,7 @@ func TestGroups_SetupOne(t *testing.T) {
 	if gotClients[0][0].DB == nil {
 		t.Errorf("client *sql.DB is nil, expected a *sql.DB to be set")
 	}
-	if gotClients[0][0].Stats != nil {
+	if gotClients[0][0].Stats[0] != nil {
 		t.Errorf("client *stats.Stats is set, expected nil stats for setup stage")
 	}
 	if gotClients[0][0].DoneChan != a.DoneChan {

@@ -35,7 +35,7 @@ var portRe = regexp.MustCompile(`:\d+$`)
 
 type Server struct {
 	cmdline CommandLine
-	comp    compute.Coordinator
+	comp    compute.Compute
 	ctx     context.Context
 	cancel  context.CancelFunc
 }
@@ -110,11 +110,11 @@ func (s *Server) Boot(env Env) error {
 	// Create compute: local or remote coordinator
 	if cfg.Compute.Server == "" {
 		finch.Debug("server mode")
-		s.comp = compute.NewCoordinator(cfg)
+		s.comp = compute.NewServer(cfg)
 	} else {
 		// @todo: add ":33075" if needed
 		finch.Debug("client mode: %s -> %s", cfg.Compute.Name, cfg.Compute.Server)
-		s.comp = compute.NewRemote(cfg.Compute.Name, cfg.Compute.Server)
+		s.comp = compute.NewClient(cfg.Compute.Name, cfg.Compute.Server)
 	}
 
 	// Server context that cancels on CTRL-C

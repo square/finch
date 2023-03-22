@@ -22,16 +22,44 @@ func TestBasicStats(t *testing.T) {
 	s.Record(stats.TOTAL, 100)
 	s.Record(stats.TOTAL, 100)
 
-	snapshot := s.Snapshot()
-	if snapshot.N[stats.TOTAL] != 5 {
-		t.Errorf("got %d events total, expected 5", snapshot.N[stats.TOTAL])
+	if s.N[stats.TOTAL] != 5 {
+		t.Errorf("got %d events total, expected 5", s.N[stats.TOTAL])
 	}
 
-	if snapshot.N[stats.READ] != 3 {
-		t.Errorf("got %d reads, expected 3", snapshot.N[stats.READ])
+	if s.N[stats.READ] != 3 {
+		t.Errorf("got %d reads, expected 3", s.N[stats.READ])
 	}
 
 	// @todo finish
+}
+
+func TestTrxStats(t *testing.T) {
+	s := stats.NewTrx("t1")
+
+	s.Record(stats.READ, 200)
+	s.Record(stats.READ, 200)
+	s.Record(stats.READ, 200)
+
+	s.Record(stats.TOTAL, 100)
+	s.Record(stats.TOTAL, 100)
+
+	a1 := s.Swap()
+	if a1.N[stats.TOTAL] != 5 {
+		t.Errorf("got %d events total, expected 5", a1.N[stats.TOTAL])
+	}
+
+	if a1.N[stats.READ] != 3 {
+		t.Errorf("got %d reads, expected 3", a1.N[stats.READ])
+	}
+
+	b1 := s.Swap()
+	if a1 == b1 {
+		t.Errorf("a == b, expected different pointers after first Swap")
+	}
+	a2 := s.Swap()
+	if a1 != a2 {
+		t.Errorf("a1 != a2, expected same pointer after second Swap")
+	}
 }
 
 func TestPecentiles_P9s(t *testing.T) {

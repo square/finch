@@ -22,32 +22,35 @@ import (
 var RetryWait = 500 * time.Millisecond
 var MaxTries = 100
 
-type Remote struct {
+// Client is a remote Instance that sends everything to the --server specified
+// on the command line. The client handles client-server communication, and it
+// wraps a Local that runs stages locally.
+type Client struct {
 	name   string
 	addr   string
-	local  *Instance
+	local  *Local
 	client *proto.Client
 	tmpdir string
-	ag     *stats.Ag
+	stats  *stats.Collector
 }
 
-var _ Coordinator = &Remote{}
+var _ Compute = &Client{}
 
-func NewRemote(name, addr string) *Remote {
-	return &Remote{
+func NewClient(name, addr string) *Client {
+	return &Client{
 		name:   name,
 		addr:   strings.TrimSuffix(addr, "/"),
 		client: proto.NewClient(name, addr),
 	}
 }
 
-func (comp *Remote) Stop() {
+func (comp *Client) Stop() {
 	if comp.local != nil {
 		comp.local.Stop()
 	}
 }
 
-func (comp *Remote) Boot(ctx context.Context, _ config.File) error {
+func (comp *Client) Boot(ctx context.Context, _ config.File) error {
 	// Fetch config file from remote server
 	var cfg config.File
 	log.Printf("Fetching config file from %s...", comp.addr)
@@ -90,7 +93,7 @@ func (comp *Remote) Boot(ctx context.Context, _ config.File) error {
 		"server": comp.addr,
 		"client": comp.name,
 	}
-	comp.ag, err = stats.NewAg(1, cfg.Stats)
+	comp.stats, err = stats.NewCollector(cfg.Stats, comp.name, 1)
 	if err != nil {
 		if !finch.Debugging {
 			os.RemoveAll(comp.tmpdir)
@@ -98,10 +101,7 @@ func (comp *Remote) Boot(ctx context.Context, _ config.File) error {
 		comp.client.Error(err)
 		return err
 	}
-	comp.local = NewInstance(
-		comp.name,
-		stats.NewCollector(cfg.Stats, comp.name, comp.ag.Chan()),
-	)
+	comp.local = NewLocal(comp.name, comp.stats)
 	if err := comp.local.Boot(ctx, cfg); err != nil {
 		if !finch.Debugging {
 			os.RemoveAll(comp.tmpdir)
@@ -119,7 +119,7 @@ func (comp *Remote) Boot(ctx context.Context, _ config.File) error {
 	return nil
 }
 
-func (comp *Remote) Run(ctx context.Context) error {
+func (comp *Client) Run(ctx context.Context) error {
 	if !finch.Debugging {
 		defer os.RemoveAll(comp.tmpdir)
 	}
@@ -152,7 +152,7 @@ func (comp *Remote) Run(ctx context.Context) error {
 
 		log.Printf("Running stage %s", stageName)
 		if stageName == finch.STAGE_BENCHMARK {
-			go comp.ag.Run() // stats aggregator
+			go comp.stats.Start()
 		}
 		err = comp.local.Run(ctx, stageName)
 		if err != nil {
@@ -161,7 +161,7 @@ func (comp *Remote) Run(ctx context.Context) error {
 			comp.client.Error(err)
 		}
 		if stageName == finch.STAGE_BENCHMARK {
-			comp.ag.Done() // send stats
+			comp.stats.Stop()
 		}
 
 		log.Println("Sending stage-done signal")
@@ -173,7 +173,7 @@ func (comp *Remote) Run(ctx context.Context) error {
 	}
 }
 
-func (comp *Remote) getTrxFiles(ctx context.Context, stage string, trx []config.Trx) error {
+func (comp *Client) getTrxFiles(ctx context.Context, stage string, trx []config.Trx) error {
 	if len(trx) == 0 {
 		finch.Debug("stage %s has no trx, ignoring", stage)
 		return nil

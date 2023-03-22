@@ -29,6 +29,7 @@ type Set struct {
 
 // Statement is one query in a transaction and all its read-only metadata.
 type Statement struct {
+	Trx       string
 	Query     string
 	ResultSet bool
 	Prepare   bool
@@ -185,7 +186,9 @@ var reFirstWord = regexp.MustCompile(`^(\w+)`)
 
 func (f *File) statement() (*Statement, error) {
 	f.stmtNo++
-	s := &Statement{}
+	s := &Statement{
+		Trx: f.cfg.Name, // trx name (trx.name or base(trx.file)
+	}
 
 	query := strings.TrimSpace(f.lb.str)
 	finch.Debug("query raw: %s", query)

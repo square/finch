@@ -29,11 +29,11 @@ type Stage struct {
 	clients  [][]*client.Client
 }
 
-func New(cfg config.Stage, s *data.Scope, r *stats.Collector) *Stage {
+func New(cfg config.Stage, s *data.Scope, c *stats.Collector) *Stage {
 	return &Stage{
 		cfg:   cfg,
 		scope: s,
-		stats: r,
+		stats: c,
 		// --
 		doneChan: make(chan error, 1),
 	}
@@ -141,7 +141,6 @@ CLIENTS:
 	}
 
 	if s.stats != nil {
-		time.Sleep(250 * time.Millisecond)
 		s.stats.Stop()
 	}
 

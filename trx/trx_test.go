@@ -38,6 +38,7 @@ func TestLoad_001(t *testing.T) {
 		Statements: map[string][]*trx.Statement{
 			"001.sql": []*trx.Statement{
 				{
+					Trx:       "001.sql",
 					Query:     "select c from t where id=%d",
 					Inputs:    []string{"@id"},
 					ResultSet: true,
@@ -91,6 +92,7 @@ func TestLoad_002(t *testing.T) {
 		Statements: map[string][]*trx.Statement{
 			"002.sql": []*trx.Statement{
 				{
+					Trx:       "002.sql",
 					Query:     "SELECT c FROM t WHERE id BETWEEN %d AND %d",
 					Inputs:    []string{"@d", "@PREV"},
 					ResultSet: true,
@@ -144,12 +146,14 @@ func TestLoad_003(t *testing.T) {
 		Statements: map[string][]*trx.Statement{
 			"003.sql": []*trx.Statement{
 				{
+					Trx:       "003.sql",
 					Query:     "select c from t1 where id=1",
 					Inputs:    nil,
 					Outputs:   []string{"@c"},
 					ResultSet: true,
 				},
 				{
+					Trx:     "003.sql",
 					Query:   "insert into t2 values ('%v')",
 					Inputs:  []string{"@c"},
 					Outputs: nil,
