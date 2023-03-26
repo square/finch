@@ -4,7 +4,6 @@ package stage
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"time"
 
@@ -25,8 +24,8 @@ type Stage struct {
 	scope *data.Scope
 	stats *stats.Collector
 	// --
-	doneChan chan error // <-Client.Run()
-	clients  [][]*client.Client
+	doneChan   chan *client.Client      // <-Client.Run()
+	execGroups [][]workload.ClientGroup // [n][Client]
 }
 
 func New(cfg config.Stage, s *data.Scope, c *stats.Collector) *Stage {
@@ -35,33 +34,30 @@ func New(cfg config.Stage, s *data.Scope, c *stats.Collector) *Stage {
 		scope: s,
 		stats: c,
 		// --
-		doneChan: make(chan error, 1),
+		doneChan: make(chan *client.Client, 1),
 	}
 }
 
 func (s *Stage) Prepare() error {
-	if s.cfg.Disable {
-		finch.Debug("stage %s disabled", s.cfg.Name)
-		return nil
-	}
 	if len(s.cfg.Trx) == 0 {
-		finch.Debug("stage %s disabled", s.cfg.Name)
-		return nil
+		panic("Stage.Prepare called with zero trx")
 	}
 	log.Printf("Preparing stage %s\n", s.cfg.Name)
 
-	// Load trx set
+	// Load and validate all config.stage.trx files. This makes and validates all
+	// data generators, too. Being valid means only that the Finch config/setup is
+	// valid, not the SQL statements because those aren't run yet, so MySQL might
+	// still return errors on Run.
 	trxSet, err := trx.Load(s.cfg.Trx, s.scope)
 	if err != nil {
 		return err
 	}
-	for _, trxName := range trxSet.Order {
-		if len(trxSet.Statements[trxName]) == 0 {
-			return fmt.Errorf("transactions %s has zero statements, at least 1 required", trxName)
-		}
-	}
 
-	// Allocate client groups based on sequence
+	// Allocate the workload (config.stage.workload): execution groups, client groups,
+	// clients, and trx assigned to clients. This is done in two steps. First, Groups
+	// returns the execution groups. Second, Clients returns the ready-to-run clients
+	// for each exec group. Both steps are required but separated for testing because
+	// the second is complex.
 	a := workload.Allocator{
 		Stage:      s.cfg.Name,
 		TrxSet:     trxSet,
@@ -76,20 +72,22 @@ func (s *Stage) Prepare() error {
 	if err != nil {
 		return err
 	}
-	s.clients, err = a.Clients(groups)
+	s.execGroups, err = a.Clients(groups)
 	if err != nil {
 		return err
 	}
 
-	// Prepare clients (e.g. create prepared statement handle) and register
-	// with stats.Collector
-	for e := range s.clients {
-		for _, c := range s.clients[e] {
-			if err := c.Prepare(); err != nil {
-				return err
-			}
-			if s.stats != nil {
-				s.stats.Watch(c.Stats)
+	// Initialize all clients in all exec groups, and register their stats with
+	// the Collector
+	for i := range s.execGroups {
+		for j := range s.execGroups[i] {
+			for _, c := range s.execGroups[i][j].Clients {
+				if err := c.Init(); err != nil {
+					return err
+				}
+				if s.stats != nil {
+					s.stats.Watch(c.Stats)
+				}
 			}
 		}
 	}
@@ -97,16 +95,25 @@ func (s *Stage) Prepare() error {
 	return nil
 }
 
-func (s *Stage) Run(ctxServer context.Context) error {
-	var ctx context.Context
-	var cancel context.CancelFunc
+func (s *Stage) Run(ctxFinch context.Context) error {
+	// There are 3 levels of contexts:
+	//
+	//   ctxFinch			from startup.Finch, catches CTRL-C
+	//   └──ctxStage		config.stage.runtime, stage runtime
+	//      └──ctxClients	config.stage.workload.runtime, client group runtime
+	//
+	// The ctxClients can end before the ctxStage if, for example, a client group
+	// is conifgured to run for less than the full stage runtime. Different client
+	// groups can also have different runtimes.
+	var ctxStage context.Context
+	var cancelStage context.CancelFunc
 	if s.cfg.Runtime != "" {
 		d, _ := time.ParseDuration(s.cfg.Runtime) // already validated
-		ctx, cancel = context.WithDeadline(ctxServer, time.Now().Add(d))
-		defer cancel() // stage and all clients
+		ctxStage, cancelStage = context.WithDeadline(ctxFinch, time.Now().Add(d))
+		defer cancelStage() // stage and all clients
 		log.Printf("Running %s for %s", s.cfg.Name, s.cfg.Runtime)
 	} else {
-		ctx = ctxServer
+		ctxStage = ctxFinch
 		log.Printf("Running %s (no runtime limit)", s.cfg.Name)
 	}
 
@@ -114,30 +121,44 @@ func (s *Stage) Run(ctxServer context.Context) error {
 		s.stats.Start()
 	}
 
-CLIENTS:
-	for e := range s.clients {
-		log.Printf("Execution group %d, %d clients", e, len(s.clients[e]))
-		for _, c := range s.clients[e] {
-			go c.Run(ctx)
-		}
+EXEC_GROUPS:
+	for i := range s.execGroups {
+		nClients := 0
+		for j := range s.execGroups[i] {
+			log.Printf("Execution group %d, client group %d, runnning %d clients", i+1, j+1, len(s.execGroups[i][j].Clients))
+			nClients += len(s.execGroups[i][j].Clients)
 
-		nRunning := len(s.clients[e])
-		for nRunning > 0 {
-			// Wait for clients
-			select {
-			case <-ctx.Done():
-				log.Println("Runtime elapsed")
-				break CLIENTS
-			case err := <-s.doneChan:
-				nRunning -= 1
-				if err != nil {
-					log.Printf("Client error: %v", err)
-				} else {
-					log.Printf("Client finished, %d still running", nRunning)
-				}
+			// See comment block above ctxStage
+			var ctxClients context.Context
+			var cancelClients context.CancelFunc
+			if s.execGroups[i][j].Runtime > 0 {
+				finch.Debug("%d/%d exec %s", s.execGroups[i][j].Runtime)
+				ctxClients, cancelClients = context.WithDeadline(ctxStage, time.Now().Add(s.execGroups[i][j].Runtime))
+				defer cancelClients()
+			} else {
+				finch.Debug("%d/%d no limit")
+				ctxClients = ctxStage
+			}
+
+			// Run all clients from <- client grp (j) <- exec grp (i)
+			for _, c := range s.execGroups[i][j].Clients {
+				go c.Run(ctxClients)
 			}
 		}
 
+		for nClients > 0 {
+			select {
+			case c := <-s.doneChan:
+				nClients -= 1
+				log.Printf("Client %s done (error: %v), %d still running", c.RunLevel.ClientId(), c.Error, nClients)
+			case <-ctxStage.Done():
+				log.Println("Stage runtime elapsed")
+				break EXEC_GROUPS
+			case <-ctxFinch.Done():
+				log.Println("Finch terminated")
+				break EXEC_GROUPS
+			}
+		}
 	}
 
 	if s.stats != nil {

@@ -5,27 +5,17 @@ package main
 import (
 	"log"
 
-	"github.com/square/finch/server"
+	"github.com/square/finch/startup"
 )
 
 func main() {
-	//runtime.GOMAXPROCS(16)
+	f := &startup.Finch{}
 
-	s := &server.Server{}
-	if err := s.Boot(server.Env{}); err != nil {
+	if err := f.Boot(startup.Env{}); err != nil {
 		log.Fatal(err)
 	}
 
-	/*
-		f, err := os.Create("cpu.prof")
-		if err != nil {
-			log.Fatal(err)
-		}
-		pprof.StartCPUProfile(f)
-	*/
-
-	if err := s.Run(); err != nil {
+	if err := f.Run(); err != nil {
 		log.Fatal(err)
 	}
-	//pprof.StopCPUProfile()
 }

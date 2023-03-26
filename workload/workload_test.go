@@ -39,7 +39,7 @@ func TestGroups_SetupOne(t *testing.T) {
 		ExecGroups: []config.ExecGroup{},
 		ExecMode:   finch.EXEC_SEQUENTIAL, // must set; Validate not called
 		Auto:       true,
-		DoneChan:   make(chan error, 1),
+		DoneChan:   make(chan *client.Client, 1),
 	}
 
 	gotGroups, err := a.Groups()
@@ -100,22 +100,27 @@ func TestGroups_SetupOne(t *testing.T) {
 		Client:        1,
 	}
 
-	expectClients := [][]*client.Client{
-		{
-			{
-				RunLevel: r,
-				Iter:     1,
-				Statements: []*trx.Statement{
-					{
-						Trx:       "001.sql",
-						Query:     "select c from t where id=%d",
-						ResultSet: true,
-						Inputs:    []string{"@id"},
-					},
-				},
-				Data: []trx.Data{
-					{
-						TrxBoundary: finch.TRX_BEGIN | finch.TRX_END,
+	expectClients := [][]workload.ClientGroup{
+		{ // exec grp 0
+			{ // client grp 0
+				Runtime: 0,
+				Clients: []*client.Client{
+					{ // client 0
+						RunLevel: r,
+						Iter:     1,
+						Statements: []*trx.Statement{
+							{
+								Trx:       "001.sql",
+								Query:     "select c from t where id=%d",
+								ResultSet: true,
+								Inputs:    []string{"@id"},
+							},
+						},
+						Data: []trx.Data{
+							{
+								TrxBoundary: finch.TRX_BEGIN | finch.TRX_END,
+							},
+						},
 					},
 				},
 			},
@@ -125,13 +130,13 @@ func TestGroups_SetupOne(t *testing.T) {
 		t.Error(diff)
 		t.Logf("got: %#v", gotClients)
 	}
-	if gotClients[0][0].DB == nil {
+	if gotClients[0][0].Clients[0].DB == nil {
 		t.Errorf("client *sql.DB is nil, expected a *sql.DB to be set")
 	}
-	if gotClients[0][0].Stats[0] != nil {
+	if gotClients[0][0].Clients[0].Stats[0] != nil {
 		t.Errorf("client *stats.Stats is set, expected nil stats for setup stage")
 	}
-	if gotClients[0][0].DoneChan != a.DoneChan {
+	if gotClients[0][0].Clients[0].DoneChan != a.DoneChan {
 		t.Errorf("client DoneChan != Allocator.DoneChan, expected Allocator to pass DoneChan to Client")
 	}
 
@@ -146,10 +151,10 @@ func TestGroups_SetupOne(t *testing.T) {
 		Query:         1,
 	}
 
-	if len(gotClients[0][0].Data) != 1 || len(gotClients[0][0].Data[0].Inputs) != 1 {
-		t.Errorf("got %d data generator, expected 1", len(gotClients[0][0].Data))
+	if len(gotClients[0][0].Clients[0].Data) != 1 || len(gotClients[0][0].Clients[0].Data[0].Inputs) != 1 {
+		t.Errorf("got %d data generator, expected 1", len(gotClients[0][0].Clients[0].Data))
 	} else {
-		gotId := gotClients[0][0].Data[0].Inputs[0].Id()
+		gotId := gotClients[0][0].Clients[0].Data[0].Inputs[0].Id()
 		expectId := data.Id{
 			RunLevel: r,
 			Type:     "uint64-counter",

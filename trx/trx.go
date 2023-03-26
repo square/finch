@@ -120,6 +120,10 @@ func (f *File) Load() error {
 		return err
 	}
 
+	if len(f.stmt) == 0 {
+		return fmt.Errorf("trx file %s has no statements; at least 1 is required", f.cfg.File)
+	}
+
 	noRefs := []string{}
 	for col, refs := range f.colRefs {
 		if refs > 0 {

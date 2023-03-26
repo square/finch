@@ -18,13 +18,18 @@ import (
 
 type Allocator struct {
 	Stage      string
-	TrxSet     *trx.Set           // config.trx (this stage)
-	ExecGroups []config.ExecGroup // config.stage.workload
-	ExecMode   string             // config.stage.exec
-	StageQPS   limit.Rate         // config.stage.qps
-	StageTPS   limit.Rate         // config.stage.tps
-	DoneChan   chan error         // Stage.doneChan
-	Auto       bool               // !config.stage.disable-auto-allocation
+	TrxSet     *trx.Set            // config.trx (this stage)
+	ExecGroups []config.ExecGroup  // config.stage.workload
+	ExecMode   string              // config.stage.exec
+	StageQPS   limit.Rate          // config.stage.qps
+	StageTPS   limit.Rate          // config.stage.tps
+	DoneChan   chan *client.Client // Stage.doneChan
+	Auto       bool                // !config.stage.disable-auto-allocation
+}
+
+type ClientGroup struct {
+	Runtime time.Duration
+	Clients []*client.Client
 }
 
 func (a *Allocator) Groups() ([][]int, error) {
@@ -136,8 +141,8 @@ func (a *Allocator) Groups() ([][]int, error) {
 	return groups, nil
 }
 
-func (a *Allocator) Clients(groups [][]int) ([][]*client.Client, error) {
-	clients := make([][]*client.Client, len(groups))
+func (a *Allocator) Clients(groups [][]int) ([][]ClientGroup, error) {
+	clients := make([][]ClientGroup, len(groups))
 	runlevel := &finch.RunLevel{
 		Stage:         a.Stage,
 		ExecGroup:     0,
@@ -152,13 +157,14 @@ func (a *Allocator) Clients(groups [][]int) ([][]*client.Client, error) {
 	var qps, tps limit.Rate
 
 	for i := range groups {
-		clients[i] = []*client.Client{}
+		clients[i] = make([]ClientGroup, len(groups[i]))
 		runlevel.ExecGroup = uint(i + 1)
 		runlevel.ExecGroupName = a.ExecGroups[groups[i][0]].Name
 
 		var execGroupIterPtr uint32
 
 		for cgNo, j := range groups[i] { // client group
+
 			runlevel.ClientGroup = uint(cgNo + 1)
 
 			if j == 0 {
@@ -171,8 +177,11 @@ func (a *Allocator) Clients(groups [][]int) ([][]*client.Client, error) {
 			qps = limit.And(qps, limit.NewRate(a.ExecGroups[j].QPSClients))
 			tps = limit.And(tps, limit.NewRate(a.ExecGroups[j].TPSClients))
 
-			for n := uint(0); n < a.ExecGroups[j].Clients; n++ { // client
-				runlevel.Client = n + 1
+			clients[i][j].Runtime, _ = time.ParseDuration(a.ExecGroups[j].Runtime)
+			clients[i][j].Clients = make([]*client.Client, a.ExecGroups[j].Clients)
+
+			for k := uint(0); k < a.ExecGroups[j].Clients; k++ { // client
+				runlevel.Client = k + 1
 
 				// Make a new sql.DB and sql.Conn for this client. Yes, sql.DB are meant
 				// to be shared, but this is a benchmark tool and each client is meant to be
@@ -276,7 +285,8 @@ func (a *Allocator) Clients(groups [][]int) ([][]*client.Client, error) {
 					c.Data[n-1].TrxBoundary |= finch.TRX_END // finch trx file, not MySQL trx
 				} // trx
 
-				clients[i] = append(clients[i], c)
+				clients[i][j].Clients[k] = c
+
 			} // client
 		} // client group
 	} // exec group

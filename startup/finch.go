@@ -1,6 +1,6 @@
 // Copyright 2022 Block, Inc.
 
-package server
+package startup
 
 import (
 	"context"
@@ -33,14 +33,14 @@ func (e Env) Empty() bool {
 
 var portRe = regexp.MustCompile(`:\d+$`)
 
-type Server struct {
+type Finch struct {
 	cmdline CommandLine
 	comp    compute.Compute
 	ctx     context.Context
 	cancel  context.CancelFunc
 }
 
-func (s *Server) Boot(env Env) error {
+func (f *Finch) Boot(env Env) error {
 	if env.Empty() {
 		env = Env{
 			Args: os.Args,
@@ -50,21 +50,21 @@ func (s *Server) Boot(env Env) error {
 
 	// Parse command line
 	var err error
-	s.cmdline, err = ParseCommandLine(env.Args)
+	f.cmdline, err = ParseCommandLine(env.Args)
 	if err != nil {
 		return err
 	}
 
 	// Set global debug var first because all code calls finch.Debug
-	finch.Debugging = s.cmdline.Options.Debug
-	finch.Debug("finch %s %+v", finch.VERSION, s.cmdline)
+	finch.Debugging = f.cmdline.Options.Debug
+	finch.Debug("finch %s %+v", finch.VERSION, f.cmdline)
 
 	// Return early (don't boot/run) --help, --verison, and --print-domains
-	if s.cmdline.Options.Help {
+	if f.cmdline.Options.Help {
 		printHelp()
 		os.Exit(0)
 	}
-	if s.cmdline.Options.Version {
+	if f.cmdline.Options.Version {
 		fmt.Println("finch", finch.VERSION)
 		os.Exit(0)
 	}
@@ -72,16 +72,16 @@ func (s *Server) Boot(env Env) error {
 	// Load config file and validate
 	var cfg config.File
 	var configFile string
-	if s.cmdline.Options.Server == "" {
+	if f.cmdline.Options.Server == "" {
 		// Config file required
-		if len(s.cmdline.Args) == 1 {
+		if len(f.cmdline.Args) == 1 {
 			log.Fatal("No config file specified")
 		}
-		configFile = s.cmdline.Args[1]
+		configFile = f.cmdline.Args[1]
 	} else {
 		// If --server is specified, then the config file is optional
-		if len(s.cmdline.Args) > 1 {
-			configFile = s.cmdline.Args[1]
+		if len(f.cmdline.Args) > 1 {
+			configFile = f.cmdline.Args[1]
 		}
 	}
 	if configFile != "" {
@@ -94,8 +94,8 @@ func (s *Server) Boot(env Env) error {
 	}
 
 	// --server override config.compute.server
-	if s.cmdline.Options.Server != "" {
-		cfg.Compute.Server = s.cmdline.Options.Server
+	if f.cmdline.Options.Server != "" {
+		cfg.Compute.Server = f.cmdline.Options.Server
 	}
 	// Append :port to server addr if not set
 	if cfg.Compute.Server != "" && !portRe.MatchString(cfg.Compute.Server) {
@@ -110,29 +110,29 @@ func (s *Server) Boot(env Env) error {
 	// Create compute: local or remote coordinator
 	if cfg.Compute.Server == "" {
 		finch.Debug("server mode")
-		s.comp = compute.NewServer(cfg)
+		f.comp = compute.NewServer(cfg)
 	} else {
 		// @todo: add ":33075" if needed
 		finch.Debug("client mode: %s -> %s", cfg.Compute.Name, cfg.Compute.Server)
-		s.comp = compute.NewClient(cfg.Compute.Name, cfg.Compute.Server)
+		f.comp = compute.NewClient(cfg.Compute.Name, cfg.Compute.Server)
 	}
 
 	// Server context that cancels on CTRL-C
-	s.ctx, s.cancel = context.WithCancel(context.Background())
+	f.ctx, f.cancel = context.WithCancel(context.Background())
 	go func() {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, os.Interrupt)
 		<-c
 		log.Println("\nCaught CTRL-C")
-		s.cancel()
+		f.cancel()
 	}()
 
-	return s.comp.Boot(s.ctx, cfg)
+	return f.comp.Boot(f.ctx, cfg)
 }
 
-func (s *Server) Run() error {
-	if !s.cmdline.Options.Run {
+func (f *Finch) Run() error {
+	if !f.cmdline.Options.Run {
 		return nil
 	}
-	return s.comp.Run(s.ctx)
+	return f.comp.Run(f.ctx)
 }

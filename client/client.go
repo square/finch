@@ -18,6 +18,7 @@ import (
 
 // Client executes SQL statements.
 type Client struct {
+	ExecGroup        uint
 	RunLevel         finch.RunLevel
 	Statements       []*trx.Statement
 	Data             []trx.Data
@@ -32,31 +33,32 @@ type Client struct {
 	Iter             uint
 	QPS              <-chan bool
 	TPS              <-chan bool
-	DoneChan         chan error
+	DoneChan         chan *Client
+	Error            error
 	// --
 	ps     []*sql.Stmt
 	values [][]interface{}
 	conn   *sql.Conn
 }
 
-func (c *Client) connect(ctx context.Context, cerr error) bool {
+func (c *Client) Init() error {
+	c.ps = make([]*sql.Stmt, len(c.Statements))
+	c.values = make([][]interface{}, len(c.Statements))
+	for i, s := range c.Statements {
+		if len(s.Inputs) > 0 {
+			c.values[i] = make([]interface{}, len(s.Inputs))
+		}
+	}
+	return nil
+}
+
+func (c *Client) Connect(ctx context.Context, cerr error) bool {
 	if c.conn != nil {
 		c.conn.Close()
 	}
-
-	// If there's a caller error, report it and (later) report when we reconnect.
-	// Else (if no cerr), caller is just connecting first time, so don't log unless
-	// connecting fails.
 	if cerr != nil {
-		// @todo return false if "Error 1054: Unknown column"
-		select {
-		case <-ctx.Done():
-			return false // stop running; client is done
-		default:
-		}
 		log.Printf("Client %s connection error: %s", c.RunLevel.ClientId(), cerr)
 	}
-
 	t0 := time.Now()
 	for i := 0; i < 100; i++ {
 		// Runtime elapsed?
@@ -85,74 +87,53 @@ func (c *Client) connect(ctx context.Context, cerr error) bool {
 	return false // cannot reconnect; stop running
 }
 
-func (c *Client) Prepare() error {
-	c.connect(context.Background(), nil)
-
-	c.ps = make([]*sql.Stmt, len(c.Statements))
-	c.values = make([][]interface{}, len(c.Statements))
+func (c *Client) Prepare(ctxExec context.Context) error {
 	for i, s := range c.Statements {
-		if s.Prepare && !s.Defer {
-			var err error
-			c.ps[i], err = c.conn.PrepareContext(context.Background(), s.Query)
-			if err != nil {
-				return fmt.Errorf("prepare %s: %w", s.Query, err)
-			}
+		if !s.Prepare {
+			continue
 		}
-		if len(s.Inputs) > 0 {
-			c.values[i] = make([]interface{}, len(s.Inputs))
+		var err error
+		c.ps[i], err = c.conn.PrepareContext(ctxExec, s.Query)
+		if err != nil {
+			return fmt.Errorf("prepare %s: %w", s.Query, err)
 		}
 	}
 	return nil
 }
 
-func (c *Client) Run(ctxStage context.Context) {
+func (c *Client) Run(ctxExec context.Context) {
 	finch.Debug("run client %s: %d stmts, runtime %s, iters %d/%d/%d", c.RunLevel.ClientId(), len(c.Statements), c.Runtime, c.IterExecGroup, c.IterClients, c.Iter)
 
-	// @todo 1 shared ctxRun for client group
-	var ctxRun context.Context
-	var cancel context.CancelFunc
-	if c.Runtime > 0 {
-		ctxRun, cancel = context.WithDeadline(ctxStage, time.Now().Add(c.Runtime))
-		defer cancel() // this client
-	} else {
-		ctxRun = ctxStage
-	}
-
 	var err error
+	var runtimeElapsed bool
+
 	defer func() {
 		if r := recover(); r != nil {
 			b := make([]byte, 4096)
 			n := runtime.Stack(b, false)
 			err = fmt.Errorf("PANIC: %v\n%s", r, string(b[0:n]))
 		}
+		// Must close prepared statments before returning to DoneChan to ensure
+		// Finch doesn't exit before we're closed them, else we'll leak them in
+		// MySQL.
 		for i := range c.ps {
 			if c.ps[i] == nil {
 				continue
 			}
 			c.ps[i].Close()
 		}
-		select {
-		case <-ctxRun.Done():
-			c.DoneChan <- nil // no error, just runtime elapsed
-		default:
+		// If the runtime elapses, err can be a "context canceled" error,
+		// which we can ignore.
+		if !runtimeElapsed {
+			c.Error = err
 		}
-
-		c.DoneChan <- err
+		c.DoneChan <- c
 	}()
 
-	c.connect(ctxRun, nil)
+	c.Connect(ctxExec, nil)
 
-	// Deferred prepare, required when db/table does exist yet
-	for i, s := range c.Statements {
-		if !s.Prepare || c.ps[i] != nil {
-			continue
-		}
-		finch.Debug("deferred prepare: %s", s.Query)
-		c.ps[i], err = c.conn.PrepareContext(ctxRun, s.Query)
-		if err != nil {
-			err = fmt.Errorf("prepare (deferred) %s: %w", s.Query, err)
-			return
-		}
+	if err = c.Prepare(ctxExec); err != nil {
+		return
 	}
 
 	var rows *sql.Rows
@@ -223,19 +204,25 @@ ITER:
 			}
 
 			if c.Statements[i].ResultSet {
+				//
 				// SELECT
+				//
 				t = time.Now()
 				if c.ps[i] != nil {
-					rows, err = c.ps[i].QueryContext(ctxRun, c.values[i]...)
+					rows, err = c.ps[i].QueryContext(ctxExec, c.values[i]...)
 				} else {
-					rows, err = c.conn.QueryContext(ctxRun, fmt.Sprintf(c.Statements[i].Query, c.values[i]...))
+					rows, err = c.conn.QueryContext(ctxExec, fmt.Sprintf(c.Statements[i].Query, c.values[i]...))
 				}
 				if c.Stats[trxNo] != nil {
 					c.Stats[trxNo].Record(stats.READ, time.Now().Sub(t).Microseconds())
 				}
 				if err != nil {
+					if ctxExec.Err() != nil {
+						err = nil
+						return
+					}
 					err = fmt.Errorf("querying %s: %w", c.Statements[i].Query, err)
-					if !c.connect(ctxRun, err) {
+					if !c.Connect(ctxExec, err) {
 						return
 					}
 					continue ITER
@@ -245,7 +232,7 @@ ITER:
 						if err = rows.Scan(c.Data[i].Outputs...); err != nil {
 							rows.Close()
 							err = fmt.Errorf("scanning result set of %s: %w", c.Statements[i].Query, err)
-							if !c.connect(ctxRun, err) {
+							if !c.Connect(ctxExec, err) {
 								return
 							}
 							continue ITER
@@ -254,19 +241,21 @@ ITER:
 				}
 				rows.Close()
 			} else {
+				//
 				// Write or query without result set (e.g. BEGIN, SET, etc.)
-				if c.Statements[i].Limit != nil {
+				//
+				if c.Statements[i].Limit != nil { // limit rows -------------
 					if !c.Statements[i].Limit.More(c.conn) {
 						return // chan closed = no more writes
 					}
 				}
 				t = time.Now()
-				if c.ps[i] != nil {
-					res, err = c.ps[i].ExecContext(ctxRun, c.values[i]...)
+				if c.ps[i] != nil { // exec ---------------------------------
+					res, err = c.ps[i].ExecContext(ctxExec, c.values[i]...)
 				} else {
-					res, err = c.conn.ExecContext(ctxRun, fmt.Sprintf(c.Statements[i].Query, c.values[i]...))
+					res, err = c.conn.ExecContext(ctxExec, fmt.Sprintf(c.Statements[i].Query, c.values[i]...))
 				}
-				if c.Stats[trxNo] != nil {
+				if c.Stats[trxNo] != nil { // record stats ------------------
 					switch {
 					case c.Statements[i].Write:
 						c.Stats[trxNo].Record(stats.WRITE, time.Now().Sub(t).Microseconds())
@@ -278,30 +267,26 @@ ITER:
 						c.Stats[trxNo].Record(stats.TOTAL, time.Now().Sub(t).Microseconds())
 					}
 				}
-				if err != nil {
+				if err != nil { // handle err, if any -----------------------
+					if ctxExec.Err() != nil {
+						err = nil
+						return
+					}
 					err = fmt.Errorf("executing %s: %w", c.Statements[i].Query, err)
-					if !c.connect(ctxRun, err) {
+					if !c.Connect(ctxExec, err) {
 						return
 					}
 					continue ITER
 				}
-				if c.Statements[i].Limit != nil {
+				if c.Statements[i].Limit != nil { // limit rows -------------
 					n, _ := res.RowsAffected()
 					c.Statements[i].Limit.Affected(n)
 				}
-				if c.Data[i].InsertId != nil {
+				if c.Data[i].InsertId != nil { // insert ID -----------------
 					id, _ := res.LastInsertId()
 					c.Data[i].InsertId.Scan(id)
 				}
-			}
+			} // write
 		} // statements
-
-		// Runtime elapsed?
-		select {
-		case <-ctxRun.Done():
-			return
-		default:
-		}
-
 	} // iterations
 }

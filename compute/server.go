@@ -29,23 +29,22 @@ type Compute interface {
 // Server coordinates instances: the local and any remotes. Server implements
 // Compute so server.Server (the Finch core server) can run as a client or server.
 type Server struct {
+	cfg config.File
+	// --
 	haveRemotes bool
 	httpServer  *http.Server
 	nInstances  uint
 	bootChan    chan ack
 	doneChan    chan ack
 
-	*sync.Mutex
-	local   *Local
-	first   string
-	remotes map[string]*remote // keyed on instance name
-
-	cfg   config.File
-	stage string
-	done  bool
-	stop  bool
-
 	stats *stats.Collector
+	local *Local
+
+	*sync.Mutex
+	remotes map[string]*remote // keyed on instance name
+	stage   string
+	done    bool
+	stop    bool
 }
 
 var _ Compute = &Server{}
@@ -96,7 +95,7 @@ func (s *Server) Stop() {
 	s.httpServer.Close()
 }
 
-func (s *Server) Boot(ctx context.Context, cfg config.File) error {
+func (s *Server) Boot(ctxFinch context.Context, cfg config.File) error {
 	var err error
 
 	// Boot stats aggregator first to ensure we can report stats, which is kind of
@@ -111,7 +110,7 @@ func (s *Server) Boot(ctx context.Context, cfg config.File) error {
 	// fail to boot, too, since they're sent the same config
 	if !config.True(cfg.Compute.DisableLocal) {
 		s.local = NewLocal(cfg.Compute.Name, s.stats)
-		if err := s.local.Boot(ctx, cfg); err != nil {
+		if err := s.local.Boot(ctxFinch, cfg); err != nil {
 			return err
 		}
 	}
@@ -159,7 +158,7 @@ func (s *Server) Boot(ctx context.Context, cfg config.File) error {
 			}
 			log.Printf("Remote %s booted", ack.name)
 			nRemotes -= 1
-		case <-ctx.Done():
+		case <-ctxFinch.Done():
 			return nil
 		}
 	}
@@ -169,10 +168,10 @@ func (s *Server) Boot(ctx context.Context, cfg config.File) error {
 }
 
 // Run runs all the stages on all the instances (local and remote).
-func (s *Server) Run(ctx context.Context) error {
+func (s *Server) Run(ctxFinch context.Context) error {
 	// Run setup on local only
 	if !s.cfg.Setup.Disable && len(s.cfg.Setup.Trx) > 0 && s.local != nil {
-		if err := s.local.Run(ctx, finch.STAGE_SETUP); err != nil {
+		if err := s.local.Run(ctxFinch, finch.STAGE_SETUP); err != nil {
 			return err
 		}
 	}
@@ -182,12 +181,12 @@ func (s *Server) Run(ctx context.Context) error {
 	// ----------------------------------------------------------------------
 	// Run warmup and benchmark on local and remotes (if any)
 	if !s.cfg.Warmup.Disable && len(s.cfg.Warmup.Trx) > 0 {
-		if err := s.run(ctx, finch.STAGE_WARMUP); err != nil {
+		if err := s.run(ctxFinch, finch.STAGE_WARMUP); err != nil {
 			return err
 		}
 	}
 	if !s.cfg.Benchmark.Disable && len(s.cfg.Benchmark.Trx) > 0 {
-		if err := s.run(ctx, finch.STAGE_BENCHMARK); err != nil {
+		if err := s.run(ctxFinch, finch.STAGE_BENCHMARK); err != nil {
 			return err
 		}
 	}
@@ -200,7 +199,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	// Run cleanup on local only
 	if !s.cfg.Cleanup.Disable && len(s.cfg.Cleanup.Trx) > 0 && s.local != nil {
-		if err := s.local.Run(ctx, finch.STAGE_CLEANUP); err != nil {
+		if err := s.local.Run(ctxFinch, finch.STAGE_CLEANUP); err != nil {
 			return err
 		}
 	}
@@ -213,7 +212,7 @@ func (s *Server) Run(ctx context.Context) error {
 WAIT:
 	for {
 		select {
-		case <-ctx.Done():
+		case <-ctxFinch.Done():
 			break WAIT
 		default:
 		}
@@ -230,7 +229,7 @@ WAIT:
 	return nil
 }
 
-func (s *Server) run(ctx context.Context, stageName string) error {
+func (s *Server) run(ctxFinch context.Context, stageName string) error {
 	finch.Debug("run %s", stageName)
 	s.Lock()
 	s.stage = stageName
@@ -245,7 +244,7 @@ func (s *Server) run(ctx context.Context, stageName string) error {
 	if s.local != nil {
 		go func() {
 			a := ack{name: "Local"}
-			a.err = s.local.Run(ctx, stageName)
+			a.err = s.local.Run(ctxFinch, stageName)
 			s.doneChan <- a
 		}()
 	}
@@ -254,16 +253,12 @@ func (s *Server) run(ctx context.Context, stageName string) error {
 	running := s.nInstances
 	for running > 0 {
 		log.Printf("%d instances running...", running)
-		select {
-		case ack := <-s.doneChan:
-			running -= 1
-			if ack.err != nil {
-				log.Printf("%s error running stage %s: %s", ack.name, stageName, ack.err)
-			} else {
-				log.Printf("%s completed stage %s", ack.name, stageName)
-			}
-		case <-ctx.Done():
-			return nil // @stop instances?
+		ack := <-s.doneChan
+		running -= 1
+		if ack.err != nil {
+			log.Printf("%s error running stage %s: %s", ack.name, stageName, ack.err)
+		} else {
+			log.Printf("%s completed stage %s", ack.name, stageName)
 		}
 	}
 

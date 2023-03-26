@@ -32,14 +32,14 @@ func NewLocal(name string, c *stats.Collector) *Local {
 func (comp *Local) Stop() {
 }
 
-func (comp *Local) Boot(ctx context.Context, cfg config.File) error {
+func (comp *Local) Boot(ctxFinch context.Context, cfg config.File) error {
 	// Test connection to MySQL
 	dbconn.SetFactory(cfg.MySQL, nil)
 	db, dsnRedacted, err := dbconn.Make()
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctxFinch, 5*time.Second)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		return err
@@ -91,7 +91,7 @@ func (comp *Local) Boot(ctx context.Context, cfg config.File) error {
 	return nil
 }
 
-func (comp *Local) Run(ctx context.Context, stageName string) error {
+func (comp *Local) Run(ctxFinch context.Context, stageName string) error {
 	stage, ok := comp.stages[stageName]
 	if !ok {
 		return nil
@@ -102,6 +102,5 @@ func (comp *Local) Run(ctx context.Context, stageName string) error {
 	//	continue
 	//}
 
-	// Run stage
-	return stage.Run(ctx)
+	return stage.Run(ctxFinch)
 }

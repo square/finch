@@ -80,6 +80,15 @@ func (c *Stage) Validate(name string) error {
 		return nil
 	}
 
+	if len(c.Trx) == 0 && len(c.Workload) == 0 {
+		c.Disable = true
+		return nil
+	}
+
+	if len(c.Trx) == 0 {
+		return fmt.Errorf("stage %s has zero trx files and is not disabled; specify at least 1 trx file or %s.disable = true", name, name)
+	}
+
 	// Trx list: must validate before Workload because Workload reference trx by name
 	for i := range c.Trx {
 		if c.Trx[i].File == "" {
@@ -94,20 +103,18 @@ func (c *Stage) Validate(name string) error {
 	}
 
 	// Workload
-	if len(c.Workload) > 0 {
-		for i := range c.Workload {
-			if err := c.Workload[i].Validate(c.Trx); err != nil {
-				return err
-			}
-		CLIENT_TRX:
-			for _, name := range c.Workload[i].Trx {
-				for i := range c.Trx {
-					if c.Trx[i].Name == name {
-						continue CLIENT_TRX
-					}
+	for i := range c.Workload {
+		if err := c.Workload[i].Validate(c.Trx); err != nil {
+			return err
+		}
+	TRX:
+		for _, name := range c.Workload[i].Trx {
+			for i := range c.Trx {
+				if c.Trx[i].Name == name {
+					continue TRX
 				}
-				return fmt.Errorf("client group %d specifies nonexistent workload: %s", i, name)
 			}
+			return fmt.Errorf("client group %d specifies nonexistent workload: %s", i, name)
 		}
 	}
 
