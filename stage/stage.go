@@ -59,14 +59,12 @@ func (s *Stage) Prepare() error {
 	// for each exec group. Both steps are required but separated for testing because
 	// the second is complex.
 	a := workload.Allocator{
-		Stage:      s.cfg.Name,
-		TrxSet:     trxSet,
-		ExecGroups: s.cfg.Workload,
-		ExecMode:   s.cfg.Exec,
-		StageQPS:   limit.NewRate(s.cfg.QPS), // nil if config.stage.qps == 0
-		StageTPS:   limit.NewRate(s.cfg.TPS), // nil if config.stage.tps == 0
-		DoneChan:   s.doneChan,
-		Auto:       !s.cfg.DisableAutoAllocation,
+		Stage:    s.cfg.Name,
+		TrxSet:   trxSet,
+		Workload: s.cfg.Workload,
+		StageQPS: limit.NewRate(s.cfg.QPS), // nil if config.stage.qps == 0
+		StageTPS: limit.NewRate(s.cfg.TPS), // nil if config.stage.tps == 0
+		DoneChan: s.doneChan,
 	}
 	groups, err := a.Groups()
 	if err != nil {

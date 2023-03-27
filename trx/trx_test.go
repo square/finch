@@ -180,3 +180,101 @@ func TestLoad_003(t *testing.T) {
 		t.Logf("got: %#v", got)
 	}
 }
+
+func TestLoad_copy3(t *testing.T) {
+	// -- copy: 3 should yield 3x the same query. copy3-1.sql has the copy: 3
+	// mod first, then a prepare mode. copy3-2.sql has the reverse. This is to
+	// test that copy works with other mods in any order. Either way, same result:
+	expect := &trx.Set{
+		Order: []string{"copy3"},
+		Statements: map[string][]*trx.Statement{
+			"copy3": []*trx.Statement{
+				{
+					Trx:          "copy3",
+					Query:        "select c from t where id=?",
+					Inputs:       []string{"@id"},
+					ResultSet:    true,
+					Prepare:      true,
+					PrepareMulti: 3,
+				},
+				{
+					Trx:          "copy3",
+					Query:        "select c from t where id=?",
+					Inputs:       []string{"@id"},
+					ResultSet:    true,
+					Prepare:      true,
+					PrepareMulti: 0,
+				},
+
+				{
+					Trx:          "copy3",
+					Query:        "select c from t where id=?",
+					Inputs:       []string{"@id"},
+					ResultSet:    true,
+					Prepare:      true,
+					PrepareMulti: 0,
+				},
+			},
+		},
+		Data: &data.Scope{
+			Keys: map[string]data.Key{
+				"@id": data.Key{
+					Name:      "@id",
+					Trx:       "copy3",
+					Line:      4,
+					Statement: 1,
+					Column:    -1,
+				},
+			},
+			CopiedAt: map[string]finch.RunLevel{},
+		},
+	}
+
+	trxList := []config.Trx{
+		{
+			Name: "copy3", // must set because we don't call Validate
+			File: "../test/trx/copy3-1.sql",
+			Data: map[string]config.Data{
+				"id": {
+					Generator: "rand-int",
+					Scope:     "trx",
+				},
+			},
+		},
+	}
+
+	scope := data.NewScope()
+	got, err := trx.Load(trxList, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := deep.Equal(got, expect); diff != nil {
+		t.Error(diff)
+		t.Logf("got: %#v", got)
+	}
+
+	// ----------------------------------------------------------------------
+
+	trxList = []config.Trx{
+		{
+			Name: "copy3",
+			File: "../test/trx/copy3-2.sql",
+			Data: map[string]config.Data{
+				"id": {
+					Generator: "rand-int",
+					Scope:     "trx",
+				},
+			},
+		},
+	}
+
+	scope = data.NewScope()
+	got, err = trx.Load(trxList, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := deep.Equal(got, expect); diff != nil {
+		t.Error(diff)
+		t.Logf("got: %#v", got)
+	}
+}

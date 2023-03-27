@@ -16,127 +16,111 @@ import (
 	"github.com/square/finch/trx"
 )
 
+// Allocator allocate a workload by using configured client groups (config.ClientGroup)
+// to create runnable client groups (workload.ClientGroup) grouped into execution groups.
+// It has two methods that must be called in order: Groups, then Clients. This is done
+// once for each stage in Stage.Prepare.
+//
+// Allocator modifies Workload.
 type Allocator struct {
-	Stage      string
-	TrxSet     *trx.Set            // config.trx (this stage)
-	ExecGroups []config.ExecGroup  // config.stage.workload
-	ExecMode   string              // config.stage.exec
-	StageQPS   limit.Rate          // config.stage.qps
-	StageTPS   limit.Rate          // config.stage.tps
-	DoneChan   chan *client.Client // Stage.doneChan
-	Auto       bool                // !config.stage.disable-auto-allocation
+	Stage    string
+	TrxSet   *trx.Set             // config.stage.trx
+	Workload []config.ClientGroup // config.stage.workload
+	StageQPS limit.Rate           // config.stage.qps
+	StageTPS limit.Rate           // config.stage.tps
+	DoneChan chan *client.Client  // Stage.doneChan
 }
 
+// ClientGroup is a runnable group of clients created from a config.ClientGroup.
+// It's the return type of Clients, grouped by the execution groups returned by
+// Groups:
+//
+//	[]config.ClientGroup -> Groups -> Clients -> [][]workload.ClientGroup
 type ClientGroup struct {
-	Runtime time.Duration
+	Runtime time.Duration // used by Stage to create a single ctx for all clients in the group
 	Clients []*client.Client
 }
 
 func (a *Allocator) Groups() ([][]int, error) {
-	if a.Auto {
-		if len(a.ExecGroups) == 0 {
-			finch.Debug("auto alloc %s", a.Stage)
-			if a.Stage == "setup" || a.Stage == "cleanup" {
-				a.ExecGroups = make([]config.ExecGroup, len(a.TrxSet.Order))
-				for i, trxName := range a.TrxSet.Order {
-					a.ExecGroups[i] = config.ExecGroup{
-						Clients: 1,
-						Iter:    1,
-						Trx:     []string{trxName},
-					}
+	// Execution is always sequential by exec group, but by default
+	// setup/cleanup are sequential, and warmup/benchmark are concurrent.
+	// This default determines how to auto-alloc stuff below when needed.
+	seq := a.Stage == finch.STAGE_SETUP || a.Stage == finch.STAGE_CLEANUP
 
-					dataLimit := false
-					for i := range a.TrxSet.Statements[trxName] {
-						if a.TrxSet.Statements[trxName][i].Limit != nil {
-							dataLimit = true
-							break
-						}
-					}
-					if dataLimit {
-						finch.Debug("trx %s has data limit; iter=0", trxName)
-						a.ExecGroups[i].Iter = 0
+	// Special case: no client groups specified (config.stage.workload=[]),
+	// so auto-allocate the workload based on the stage default seq or not.
+	if len(a.Workload) == 0 {
+		if seq {
+			// 1 client group per trx executed sequentially (default setup workload)
+			a.Workload = make([]config.ClientGroup, len(a.TrxSet.Order))
+			for i, trxName := range a.TrxSet.Order {
+				a.Workload[i] = config.ClientGroup{
+					Clients: 1,
+					Iter:    1,
+					Trx:     []string{trxName},
+				}
+				dataLimit := false
+				for i := range a.TrxSet.Statements[trxName] {
+					if a.TrxSet.Statements[trxName][i].Limit != nil {
+						dataLimit = true
+						break
 					}
 				}
-			} else { // warmup and benchmark
-				a.ExecGroups = []config.ExecGroup{
-					{
-						Clients: 1,
-						Trx:     a.TrxSet.Order,
-					},
+				if dataLimit {
+					finch.Debug("trx %s has data limit; iter=0", trxName)
+					a.Workload[i].Iter = 0
 				}
 			}
 		} else {
-			// partial auto alloc (fill in the gaps)
-			// Ensure each trx has a client group
-			// If one doesn't, give it a default client group
-			finch.Debug("partial alloc %s: %+v", a.Stage, a.ExecGroups)
-
-			for i := range a.ExecGroups {
-				if len(a.ExecGroups[i].Trx) > 0 {
-					continue
-				}
-				finch.Debug("assign all trx to exec group %d", i)
-				a.ExecGroups[i].Trx = make([]string, len(a.TrxSet.Order))
-				copy(a.ExecGroups[i].Trx, a.TrxSet.Order)
-			}
-
-		TRX:
-			for _, trxName := range a.TrxSet.Order {
-				for _, execGrp := range a.ExecGroups {
-					for i := range execGrp.Trx {
-						if execGrp.Trx[i] == trxName {
-							continue TRX
-						}
-					}
-				}
-				// Not assigned, so assign it
-				execGrp := config.ExecGroup{
+			// 1 exec for all trx executed concurrently (default benchmark workload)
+			a.Workload = []config.ClientGroup{
+				{
 					Clients: 1,
-					Trx:     []string{trxName},
-				}
-				if a.Stage == "setup" || a.Stage == "cleanup" {
-					execGrp.Iter = 1
-				}
-				a.ExecGroups = append(a.ExecGroups, execGrp)
-				finch.Debug("created exec group %d for %s", len(a.ExecGroups)-1, trxName)
+					Trx:     a.TrxSet.Order,
+				},
 			}
 		}
-	}
-	for i := range a.ExecGroups {
-		if a.ExecGroups[i].Name == "" {
-			a.ExecGroups[i].Name = fmt.Sprintf("e%d", i+1)
-		}
-		finch.Debug("%3d exec group: %+v", i, a.ExecGroups[i])
 	}
 
-	var groups [][]int
-	switch a.ExecMode {
-	case finch.EXEC_SEQUENTIAL:
-		// exec group "name" -> N clients (grouped by exec group name)
-		groups = [][]int{}
-		groupNo := -1
-		groupName := ""
-		for i := range a.ExecGroups {
-			if a.ExecGroups[i].Name != groupName {
-				// New group
-				groups = append(groups, []int{})
-				groupNo++
-				groupName = a.ExecGroups[i].Name
+	// Fill in missing client group names. Names are required because they determine
+	// exec groups in the follow code block.
+	autoNo := 1
+	prevExplicit := false
+	for i := range a.Workload {
+		if len(a.Workload[i].Trx) == 0 {
+			a.Workload[i].Trx = a.TrxSet.Order
+		}
+		if a.Workload[i].Name == "" {
+			if seq {
+				a.Workload[i].Name = fmt.Sprintf("auto%d", i+1)
+			} else {
+				if prevExplicit {
+					autoNo += 1
+				}
+				a.Workload[i].Name = fmt.Sprintf("auto%d", autoNo)
 			}
-			groups[groupNo] = append(groups[groupNo], i)
+			prevExplicit = false
+		} else {
+			prevExplicit = true
 		}
-		finch.Debug("exec groups: %+v", groups)
-	case finch.EXEC_CONCURRENT:
-		// 1 exec group -> all clients
-		groups = make([][]int, 1)
-		groups[0] = make([]int, len(a.ExecGroups))
-		for j := range a.ExecGroups {
-			groups[0][j] = j
-		}
-	default:
-		// Shouldn't happen because config should have already been validated
-		panic("invalid config.exec: " + a.ExecMode)
 	}
+
+	// Group client groups by name to form exec groups.
+	groups := [][]int{}
+	groupNo := -1
+	name := ""
+	for i := range a.Workload {
+		if name != a.Workload[i].Name {
+			groups = append(groups, []int{})
+			groupNo += 1
+			name = a.Workload[i].Name
+		}
+		groups[groupNo] = append(groups[groupNo], i)
+	}
+	for i := range a.Workload {
+		finch.Debug("%3d exec group: %+v", i, a.Workload[i])
+	}
+	finch.Debug("exec groups: %+v", groups)
 
 	return groups, nil
 }
@@ -154,33 +138,33 @@ func (a *Allocator) Clients(groups [][]int) ([][]ClientGroup, error) {
 		Query:         0,
 	}
 
-	var qps, tps limit.Rate
+	for egNo := range groups {
+		runlevel.ExecGroup = uint(egNo + 1)
 
-	for i := range groups {
-		clients[i] = make([]ClientGroup, len(groups[i]))
-		runlevel.ExecGroup = uint(i + 1)
-		runlevel.ExecGroupName = a.ExecGroups[groups[i][0]].Name
+		cgFirst := a.Workload[groups[egNo][0]]
+		runlevel.ExecGroupName = cgFirst.Name
+
+		execGroupQPS := limit.And(a.StageQPS, limit.NewRate(cgFirst.QPSExecGroup))
+		execGroupTPS := limit.And(a.StageTPS, limit.NewRate(cgFirst.TPSExecGroup))
+
+		clients[egNo] = make([]ClientGroup, len(groups[egNo]))
 
 		var execGroupIterPtr uint32
 
-		for cgNo, j := range groups[i] { // client group
-
+		for cgNo, egRefNo := range groups[egNo] { // client group
+			finch.Debug("alloc %d/%d eg ref %d", egNo, cgNo, egRefNo)
 			runlevel.ClientGroup = uint(cgNo + 1)
+			cg := a.Workload[egRefNo]
 
-			if j == 0 {
-				qps = limit.And(a.StageQPS, limit.NewRate(a.ExecGroups[j].QPSExecGroup))
-				tps = limit.And(a.StageTPS, limit.NewRate(a.ExecGroups[j].TPSExecGroup))
-			}
+			clientsQPS := limit.And(execGroupQPS, limit.NewRate(cg.QPSClients))
+			clientsTPS := limit.And(execGroupTPS, limit.NewRate(cg.TPSClients))
+
+			clients[egNo][cgNo].Runtime, _ = time.ParseDuration(cg.Runtime)
+			clients[egNo][cgNo].Clients = make([]*client.Client, cg.Clients)
 
 			var clientsIterPtr uint32
 
-			qps = limit.And(qps, limit.NewRate(a.ExecGroups[j].QPSClients))
-			tps = limit.And(tps, limit.NewRate(a.ExecGroups[j].TPSClients))
-
-			clients[i][j].Runtime, _ = time.ParseDuration(a.ExecGroups[j].Runtime)
-			clients[i][j].Clients = make([]*client.Client, a.ExecGroups[j].Clients)
-
-			for k := uint(0); k < a.ExecGroups[j].Clients; k++ { // client
+			for k := uint(0); k < cg.Clients; k++ { // client
 				runlevel.Client = k + 1
 
 				// Make a new sql.DB and sql.Conn for this client. Yes, sql.DB are meant
@@ -193,45 +177,42 @@ func (a *Allocator) Clients(groups [][]int) ([][]ClientGroup, error) {
 					return nil, err
 				}
 
-				runtime, _ := time.ParseDuration(a.ExecGroups[j].Runtime) // already validated
-
 				c := &client.Client{
 					RunLevel: *runlevel, // copy
 					DB:       db,
-					Iter:     a.ExecGroups[j].Iter,
-					Runtime:  runtime,
+					Iter:     cg.Iter,
 					DoneChan: a.DoneChan,
-					Stats:    make([]*stats.Trx, len(a.ExecGroups[j].Trx)), // stats per trx
+					Stats:    make([]*stats.Trx, len(cg.Trx)), // stats per trx
 				}
 
 				// Set combined limits, if any: iterations, QPS, TPS
-				if a.ExecGroups[j].IterClients > 0 {
-					c.IterClients = a.ExecGroups[j].IterClients
+				if cg.IterClients > 0 {
+					c.IterClients = cg.IterClients
 					c.IterClientsPtr = &clientsIterPtr
 				}
-				if a.ExecGroups[j].IterExecGroup > 0 {
-					c.IterExecGroup = a.ExecGroups[j].IterExecGroup
+				if cg.IterExecGroup > 0 {
+					c.IterExecGroup = cg.IterExecGroup
 					c.IterExecGroupPtr = &execGroupIterPtr
 				}
-				if qps = limit.And(qps, limit.NewRate(a.ExecGroups[j].QPS)); qps != nil {
+				if qps := limit.And(clientsQPS, limit.NewRate(cg.QPS)); qps != nil {
 					c.QPS = qps.Allow()
 				}
-				if tps = limit.And(tps, limit.NewRate(a.ExecGroups[j].TPS)); tps != nil {
+				if tps := limit.And(clientsTPS, limit.NewRate(cg.TPS)); tps != nil {
 					c.TPS = tps.Allow()
 				}
 
 				// Copy statements from transactions assigned to this client,
 				// which can be a subset of all trx (config.stage.trx) and in
-				// a differnet order
+				// a different order.
 				n := 0
-				for _, trxName := range a.ExecGroups[j].Trx {
+				for _, trxName := range cg.Trx {
 					n += len(a.TrxSet.Statements[trxName])
 				}
 				c.Statements = make([]*trx.Statement, n)
 				c.Data = make([]trx.Data, n)
 
 				n = 0
-				for trxNo, trxName := range a.ExecGroups[j].Trx {
+				for trxNo, trxName := range cg.Trx {
 					runlevel.Trx += 1
 					runlevel.TrxName = trxName
 					runlevel.Query = 0
@@ -242,7 +223,7 @@ func (a *Allocator) Clients(groups [][]int) ([][]ClientGroup, error) {
 					for _, stmt := range a.TrxSet.Statements[trxName] {
 						runlevel.Query += 1
 						finch.Debug("--- %s", runlevel)
-						c.Statements[n] = stmt // *Statement assigment; don't modify
+						c.Statements[n] = stmt // *Statement pointer; don't modify
 
 						if len(stmt.Inputs) > 0 {
 							c.Data[n].Inputs = []data.Generator{}
@@ -285,7 +266,7 @@ func (a *Allocator) Clients(groups [][]int) ([][]ClientGroup, error) {
 					c.Data[n-1].TrxBoundary |= finch.TRX_END // finch trx file, not MySQL trx
 				} // trx
 
-				clients[i][j].Clients[k] = c
+				clients[egNo][cgNo].Clients[k] = c
 
 			} // client
 		} // client group

@@ -25,7 +25,6 @@ type Client struct {
 	Stats            []*stats.Trx `deep:"-"`
 	TrxBoundary      []byte       `deep:"-"`
 	DB               *sql.DB      `deep:"-"`
-	Runtime          time.Duration
 	IterExecGroup    uint32
 	IterExecGroupPtr *uint32
 	IterClients      uint32
@@ -61,11 +60,8 @@ func (c *Client) Connect(ctx context.Context, cerr error) bool {
 	}
 	t0 := time.Now()
 	for i := 0; i < 100; i++ {
-		// Runtime elapsed?
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return false
-		default:
 		}
 		var err error
 		c.conn, err = c.DB.Conn(ctx)
@@ -92,17 +88,27 @@ func (c *Client) Prepare(ctxExec context.Context) error {
 		if !s.Prepare {
 			continue
 		}
+		if c.ps[i] != nil {
+			continue // prepare multi
+		}
 		var err error
 		c.ps[i], err = c.conn.PrepareContext(ctxExec, s.Query)
 		if err != nil {
 			return fmt.Errorf("prepare %s: %w", s.Query, err)
+		}
+
+		// If s.PrepareMulti = 3, it means this ps should be used for 3 statments
+		// including this one, so copy it into the next 2 statements. If = 0, this
+		// loop doesn't run becuase j = 1; j < 0 is immediately false.
+		for j := 1; j < s.PrepareMulti; j++ {
+			c.ps[i+j] = c.ps[i]
 		}
 	}
 	return nil
 }
 
 func (c *Client) Run(ctxExec context.Context) {
-	finch.Debug("run client %s: %d stmts, runtime %s, iters %d/%d/%d", c.RunLevel.ClientId(), len(c.Statements), c.Runtime, c.IterExecGroup, c.IterClients, c.Iter)
+	finch.Debug("run client %s: %d stmts, runtime %s, iters %d/%d/%d", c.RunLevel.ClientId(), len(c.Statements), c.IterExecGroup, c.IterClients, c.Iter)
 
 	var err error
 	var runtimeElapsed bool
@@ -286,7 +292,7 @@ ITER:
 					id, _ := res.LastInsertId()
 					c.Data[i].InsertId.Scan(id)
 				}
-			} // write
+			} // execute
 		} // statements
 	} // iterations
 }

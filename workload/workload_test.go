@@ -34,12 +34,10 @@ func TestGroups_SetupOne(t *testing.T) {
 	}
 
 	a := workload.Allocator{
-		Stage:      "setup",
-		TrxSet:     set,
-		ExecGroups: []config.ExecGroup{},
-		ExecMode:   finch.EXEC_SEQUENTIAL, // must set; Validate not called
-		Auto:       true,
-		DoneChan:   make(chan *client.Client, 1),
+		Stage:    "setup",
+		TrxSet:   set,
+		Workload: []config.ClientGroup{},
+		DoneChan: make(chan *client.Client, 1),
 	}
 
 	gotGroups, err := a.Groups()
@@ -55,25 +53,23 @@ func TestGroups_SetupOne(t *testing.T) {
 		t.Logf("got: %#v", gotGroups)
 	}
 
-	eg := []config.ExecGroup{
+	eg := []config.ClientGroup{
 		{
-			Name:    "e1",
+			Name:    "auto1",
 			Clients: 1,
 			Iter:    1,
 			Trx:     []string{"001.sql"},
 		},
 	}
-	if diff := deep.Equal(a.ExecGroups, eg); diff != nil {
+	if diff := deep.Equal(a.Workload, eg); diff != nil {
 		t.Error(diff)
-		t.Logf("got: %#v", a.ExecGroups)
+		t.Logf("got: %#v", a.Workload)
 	}
 
 	a = workload.Allocator{
-		Stage:      "setup",
-		TrxSet:     set,
-		ExecGroups: []config.ExecGroup{},
-		ExecMode:   finch.EXEC_CONCURRENT, // must set; Validate not called
-		Auto:       true,
+		Stage:    "setup",
+		TrxSet:   set,
+		Workload: []config.ClientGroup{},
 	}
 	gotGroups, err = a.Groups()
 	if err != nil {
@@ -95,7 +91,7 @@ func TestGroups_SetupOne(t *testing.T) {
 	r := finch.RunLevel{
 		Stage:         "setup",
 		ExecGroup:     1,
-		ExecGroupName: "e1",
+		ExecGroupName: "auto1",
 		ClientGroup:   1,
 		Client:        1,
 	}
@@ -143,7 +139,7 @@ func TestGroups_SetupOne(t *testing.T) {
 	r = finch.RunLevel{
 		Stage:         "setup",
 		ExecGroup:     1,
-		ExecGroupName: "e1",
+		ExecGroupName: "auto1",
 		ClientGroup:   1,
 		Client:        1,
 		Trx:           1,
@@ -192,14 +188,12 @@ func TestGroups_PartialAlloc(t *testing.T) {
 	a := workload.Allocator{
 		Stage:  "setup",
 		TrxSet: set,
-		ExecGroups: []config.ExecGroup{
+		Workload: []config.ClientGroup{
 			{
 				Clients: 1,
 				// Trx: []string not set, so this exec group gets all trx
 			},
 		},
-		ExecMode: finch.EXEC_SEQUENTIAL, // must set; Validate not called
-		Auto:     true,
 	}
 
 	gotGroups, err := a.Groups()
@@ -213,15 +207,15 @@ func TestGroups_PartialAlloc(t *testing.T) {
 		t.Logf("got: %#v", gotGroups)
 	}
 
-	eg := []config.ExecGroup{
+	eg := []config.ClientGroup{
 		{
-			Name:    "e1",
+			Name:    "auto1",
 			Clients: 1,
 			Trx:     []string{"001.sql"}, // auto-assigned
 		},
 	}
-	if diff := deep.Equal(a.ExecGroups, eg); diff != nil {
+	if diff := deep.Equal(a.Workload, eg); diff != nil {
 		t.Error(diff)
-		t.Logf("got: %#v", a.ExecGroups)
+		t.Logf("got: %#v", a.Workload)
 	}
 }

@@ -29,19 +29,19 @@ type Set struct {
 
 // Statement is one query in a transaction and all its read-only metadata.
 type Statement struct {
-	Trx       string
-	Query     string
-	ResultSet bool
-	Prepare   bool
-	Defer     bool
-	Begin     bool
-	Commit    bool
-	Write     bool
-	Idle      time.Duration
-	Inputs    []string // data keys (number of values)
-	Outputs   []string // data keys save-results|columns and save-insert-id
-	InsertId  string   // data key (special output)
-	Limit     limit.Data
+	Trx          string
+	Query        string
+	ResultSet    bool
+	Prepare      bool
+	PrepareMulti int
+	Begin        bool
+	Commit       bool
+	Write        bool
+	Idle         time.Duration
+	Inputs       []string // data keys (number of values)
+	Outputs      []string // data keys save-results|columns and save-insert-id
+	InsertId     string   // data key (special output)
+	Limit        limit.Data
 }
 
 // Data is various I/O, controls, and flags that are scoped and copied for each statement.
@@ -155,7 +155,7 @@ func (f *File) line(line string) error {
 			if line == "-- EOF" {
 				return ErrEOF
 			}
-			f.lb.mods = append(f.lb.mods, strings.TrimPrefix(line, "--"))
+			f.lb.mods = append(f.lb.mods, strings.TrimSpace(strings.TrimPrefix(line, "--")))
 		} else {
 			f.lb.str += line + " "
 		}
@@ -174,8 +174,10 @@ func (f *File) line(line string) error {
 	if err != nil {
 		return err
 	}
-	finch.Debug("stmt: %+v", s)
-	f.stmt = append(f.stmt, s)
+	for i := range s {
+		finch.Debug("stmt: %+v", s[i])
+	}
+	f.stmt = append(f.stmt, s...)
 
 	f.lb.str = ""
 	f.lb.mods = []string{}
@@ -188,7 +190,7 @@ var reData = regexp.MustCompile(`@[\w_-]+`)
 var reCSV = regexp.MustCompile(`\/\*\!csv\s+(\d+)\s+(.+)\*\/`)
 var reFirstWord = regexp.MustCompile(`^(\w+)`)
 
-func (f *File) statement() (*Statement, error) {
+func (f *File) statement() ([]*Statement, error) {
 	f.stmtNo++
 	s := &Statement{
 		Trx: f.cfg.Name, // trx name (trx.name or base(trx.file)
@@ -228,9 +230,6 @@ func (f *File) statement() (*Statement, error) {
 		switch m[0] {
 		case "prepare", "prepared":
 			s.Prepare = true
-			if len(m) == 2 && strings.ToLower(m[1]) == "defer" {
-				s.Defer = true
-			}
 		case "idle":
 			d, err := time.ParseDuration(m[1])
 			if err != nil {
@@ -288,8 +287,48 @@ func (f *File) statement() (*Statement, error) {
 				}
 				s.Outputs = append(s.Outputs, dataKey)
 			}
+		case "copy":
+			n, err := strconv.Atoi(m[1])
+			if err != nil {
+				return nil, fmt.Errorf("copy: %s invalid: %s", m[1], err)
+			}
+			if n < 0 {
+				return nil, fmt.Errorf("copy: %s invalid: must be >= 0", m[1])
+			}
+			if n == 0 {
+				return nil, nil
+			}
+			if n == 1 {
+				continue
+			}
+			prepareMulti := false
+			mods := make([]string, 0, len(f.lb.mods)-1)
+			for _, mod := range f.lb.mods {
+				if strings.HasPrefix(mod, "copy") {
+					continue
+				}
+				if strings.HasPrefix(mod, "prepare") {
+					prepareMulti = true
+				}
+				mods = append(mods, mod)
+			}
+			f.lb.mods = mods
+			f.stmtNo--
+			multi := make([]*Statement, n)
+			for i := 0; i < n; i++ {
+				finch.Debug("multi %d of %d", i+1, n)
+				ms, err := f.statement() // recurse
+				if err != nil {
+					return nil, fmt.Errorf("during copy recurse: %s", err)
+				}
+				multi[i] = ms[0]
+			}
+			if prepareMulti {
+				multi[0].PrepareMulti = n
+			}
+			return multi, nil
 		default:
-			return s, fmt.Errorf("unknown modifier: %s: '%s'", m[0], mod)
+			return nil, fmt.Errorf("unknown modifier: %s: '%s'", m[0], mod)
 		}
 	}
 
@@ -301,7 +340,7 @@ func (f *File) statement() (*Statement, error) {
 	if len(m) > 0 {
 		n, err := strconv.ParseInt(m[1], 10, 32)
 		if err != nil {
-			return s, fmt.Errorf("invalid number of CSV values in %s: %s", m[0], err)
+			return nil, fmt.Errorf("invalid number of CSV values in %s: %s", m[0], err)
 		}
 		vals := make([]string, n)
 		val := strings.TrimSpace(m[2])
@@ -321,7 +360,7 @@ func (f *File) statement() (*Statement, error) {
 	finch.Debug("data keys: %v", dataKeys)
 	if len(dataKeys) == 0 {
 		s.Query = query
-		return s, nil // no data key, return early
+		return []*Statement{s}, nil // no data key, return early
 	}
 	s.Inputs = dataKeys
 	dataFormats := map[string]string{} // keyed on data name
@@ -334,7 +373,7 @@ func (f *File) statement() (*Statement, error) {
 			g = k.Generator
 		} else if name == "@PREV" {
 			if i == 0 {
-				return s, fmt.Errorf("no @PREV data generator")
+				return nil, fmt.Errorf("no @PREV data generator")
 			}
 			g = f.set.Data.Keys[dataKeys[i-1]].Generator
 			finch.Debug("@PREV = %s: %s", dataKeys[i-1], g.Id())
@@ -344,12 +383,12 @@ func (f *File) statement() (*Statement, error) {
 			} else {
 				dataCfg, ok := f.cfg.Data[strings.TrimPrefix(name, "@")] // config.stage.trx.*.data
 				if !ok {
-					return s, fmt.Errorf("no params for data name %s", name)
+					return nil, fmt.Errorf("no params for data name %s", name)
 				}
 				finch.Debug("make data generator %s for %s", dataCfg.Generator, name)
 				g, err = data.Make(dataCfg.Generator, name, dataCfg.Scope, dataCfg.Params)
 				if err != nil {
-					return s, err
+					return nil, err
 				}
 				f.set.Data.Keys[name] = data.Key{
 					Name:      name,
@@ -381,7 +420,7 @@ func (f *File) statement() (*Statement, error) {
 	r := strings.NewReplacer(replacements...)
 	s.Query = r.Replace(query)
 	// Caller debug prints full Statement
-	return s, nil
+	return []*Statement{s}, nil
 }
 
 func (f *File) column(colNo int, col string) (string, error) {

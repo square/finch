@@ -121,7 +121,7 @@ func (s *Server) Boot(ctxFinch context.Context, cfg config.File) error {
 		nRemotes -= 1
 	}
 	s.haveRemotes = nRemotes > 0
-	log.Printf("Compute coordinator: %d instances (%d remote)", s.nInstances, nRemotes)
+	log.Printf("Compute: %d instances (%d remote)", s.nInstances, nRemotes)
 
 	// If no remotes, then we're done booting; coordinator is kind of useless overhead
 	// but other funcs will check s.haveRemotes and avoid the extra complexity of

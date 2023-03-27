@@ -60,12 +60,10 @@ type Stage struct {
 	QPS     uint   `yaml:"qps,omitempty"`
 	TPS     uint   `yaml:"tps,omitempty"`
 
-	Exec     string      `yaml:"exec,omitempty"`
-	Workload []ExecGroup `yaml:"workload,omitempty"`
-	Trx      []Trx       `yaml:"trx,omitempty"`
+	Workload []ClientGroup `yaml:"workload,omitempty"`
+	Trx      []Trx         `yaml:"trx,omitempty"`
 
-	Disable               bool `yaml:"disable"`
-	DisableAutoAllocation bool `yaml:"disable-auto-allocation,omitempty"`
+	Disable bool `yaml:"disable"`
 }
 
 type Trx struct {
@@ -103,38 +101,47 @@ func (c *Stage) Validate(name string) error {
 	}
 
 	// Workload
+	names := map[string]int{}
+	withTrx := map[int]int{}
+	withoutTrx := map[int]int{}
 	for i := range c.Workload {
 		if err := c.Workload[i].Validate(c.Trx); err != nil {
 			return err
 		}
-	TRX:
-		for _, name := range c.Workload[i].Trx {
-			for i := range c.Trx {
-				if c.Trx[i].Name == name {
-					continue TRX
+
+		if c.Workload[i].Name != "" {
+			if last, ok := names[c.Workload[i].Name]; !ok {
+				names[c.Workload[i].Name] = i
+			} else {
+				if last != i-1 {
+					return fmt.Errorf("duplicate or non-consecutive execution group name: %s: first at %s.workload[%d], then at %s.workoad[%d]; unique group names must consecutive", c.Workload[i].Name, name, last, name, i)
 				}
 			}
-			return fmt.Errorf("client group %d specifies nonexistent workload: %s", i, name)
 		}
+
+		if len(c.Workload[i].Trx) > 0 {
+			withTrx[i] = i
+		TRX:
+			for j, trxName := range c.Workload[i].Trx {
+				for k := range c.Trx {
+					if trxName == c.Trx[k].Name {
+						continue TRX
+					}
+				}
+				return fmt.Errorf("%s.workload[%d].trx[%d]: '%s' not defined in %s.trx", name, i, j, trxName, name)
+			}
+		} else {
+			withoutTrx[i] = i
+		}
+	}
+
+	if len(withTrx) > 0 && len(withoutTrx) > 0 {
+		return fmt.Errorf("%s.workload has mixed trx assignments", name)
 	}
 
 	// Runtime
 	if err := ValidFreq(c.Runtime, "workload"); err != nil {
 		return err
-	}
-
-	// Exec
-	switch c.Exec {
-	case "sequential":
-	case "concurrenct":
-	case "": // Auto-set
-		if c.Name == "setup" || c.Name == "cleanup" {
-			c.Exec = "sequential"
-		} else {
-			c.Exec = "concurrent"
-		}
-	default:
-		return fmt.Errorf("invalid exec: %s (valid values: sequential, concurrent)", c.Exec)
 	}
 
 	// Script
@@ -151,7 +158,7 @@ type Data struct {
 	Params    map[string]string `yaml:"params"` // Generator-specific params
 }
 
-type ExecGroup struct {
+type ClientGroup struct {
 	Clients       uint     `yaml:"clients,omitempty"`
 	Db            string   `yaml:"db,omitempty"`
 	Iter          uint     `yaml:"iter,omitempty"`
@@ -168,7 +175,7 @@ type ExecGroup struct {
 	Trx           []string `yaml:"trx,omitempty"`
 }
 
-func (c *ExecGroup) Validate(w []Trx) error {
+func (c *ClientGroup) Validate(w []Trx) error {
 	if c.Clients == 0 {
 		c.Clients = 1
 	}

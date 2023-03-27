@@ -1,46 +1,20 @@
 
 BEGIN
 
--- prepare defer
+-- prepare
+-- copy: 10
 SELECT c FROM sbtest1 WHERE id=@id
 
--- prepare defer
-SELECT c FROM sbtest1 WHERE id=@id
-
--- prepare defer
-SELECT c FROM sbtest1 WHERE id=@id
-
--- prepare defer
-SELECT c FROM sbtest1 WHERE id=@id
-
--- prepare defer
-SELECT c FROM sbtest1 WHERE id=@id
-
--- prepare defer
-SELECT c FROM sbtest1 WHERE id=@id
-
--- prepare defer
-SELECT c FROM sbtest1 WHERE id=@id
-
--- prepare defer
-SELECT c FROM sbtest1 WHERE id=@id
-
--- prepare defer
-SELECT c FROM sbtest1 WHERE id=@id
-
--- prepare defer
-SELECT c FROM sbtest1 WHERE id=@id
-
--- prepare defer
+-- prepare
 SELECT c FROM sbtest1 WHERE id BETWEEN @id_100 AND @PREV
 
--- prepare defer
+-- prepare
 SELECT SUM(k) FROM sbtest1 WHERE id BETWEEN @id_100 AND @PREV
 
--- prepare defer
+-- prepare
 SELECT c FROM sbtest1 WHERE id BETWEEN @id_100 AND @PREV ORDER BY c
 
--- prepare defer
+-- prepare
 SELECT DISTINCT c FROM sbtest1 WHERE id BETWEEN @id_100 AND @PREV ORDER BY c
 
 COMMIT
