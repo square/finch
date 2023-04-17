@@ -89,6 +89,7 @@ func (s *Stats) Record(eventType byte, d int64) {
 	}
 }
 
+// Reset resets all values to zero.
 func (s *Stats) Reset() {
 	for i := 0; i < nEventTypes; i++ {
 		for j := range s.Buckets[i] {
@@ -100,13 +101,14 @@ func (s *Stats) Reset() {
 	}
 }
 
-// Copy copies all stats to dst, overwriting all values in dst.
-func (s *Stats) Copy(dst *Stats) {
+// Copy copies all stats from c, overwriting all values in s. Calling Reset before
+// Copy is not necessary because the copy overwrites all values.
+func (s *Stats) Copy(c *Stats) {
 	for i := 0; i < nEventTypes; i++ {
-		copy(dst.Buckets[i], s.Buckets[i])
-		dst.Min[i] = s.Min[i]
-		dst.Max[i] = s.Max[i]
-		dst.N[i] = s.N[i]
+		copy(s.Buckets[i], c.Buckets[i])
+		s.Min[i] = c.Min[i]
+		s.Max[i] = c.Max[i]
+		s.N[i] = c.N[i]
 	}
 }
 

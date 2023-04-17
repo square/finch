@@ -75,15 +75,17 @@ func (f factory) Make(name, dataName, scope string, params map[string]string) (G
 		Type:    name,
 		DataKey: dataName,
 	}
+	var g Generator
+	var err error
 	switch name {
 	case "rand-int":
-		return NewRandInt(id, params)
+		g, err = NewRandInt(id, params)
 	case "int-range":
-		return NewIntRange(id, params)
+		g, err = NewIntRange(id, params)
 	case "int-sequence":
-		return NewIntSequence(id, params)
+		g, err = NewIntSequence(id, params)
 	case "uint64-counter":
-		return NewIncUint64(id, params), nil
+		g = NewIncUint64(id, params)
 	case "str-not-null":
 		s, ok := params["len"]
 		if !ok {
@@ -93,15 +95,27 @@ func (f factory) Make(name, dataName, scope string, params map[string]string) (G
 		if err != nil {
 			return nil, err
 		}
-		return NewStrNotNull(id, n), nil
+		g = NewStrNotNull(id, n)
 	case "column":
-		return NewColumn(id, params), nil
+		g = NewColumn(id, params)
 	case "xid":
-		return NewXid(id), nil
+		g = NewXid(id)
 	case "project-int":
-		return NewProjectInt(id, params)
+		g, err = NewProjectInt(id, params)
+	default:
+		return nil, fmt.Errorf("built-in data factory cannot make %s data generator", name)
 	}
-	return nil, fmt.Errorf("built-in data factory cannot make %s data generator", name)
+	if err != nil {
+		return nil, err
+	}
+
+	// Statement-scoped; don't wrap
+	if id.Scope == "" || id.Scope == finch.SCOPE_STATEMENT {
+		return g, nil
+	}
+
+	// Trx scope and higher: wrap in ScopedGenerator that will handle scope logic
+	return NewScopedGenerator(g), nil
 }
 
 var r = &repo{

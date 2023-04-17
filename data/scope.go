@@ -91,3 +91,45 @@ func (s *Scope) Reset() {
 		delete(s.Keys, keyName)
 	}
 }
+
+// --------------------------------------------------------------------------
+
+// ScopedGenerator wraps a Generator to handle scopes higher that statement.
+// This prevents each generator from needing to be aware of or implement
+// scope-handling logic. Generators are wrapped automatically in factory.Make.
+type ScopedGenerator struct {
+	g     Generator     // real generator
+	s     string        //   its scope
+	vals  []interface{} //   its current value
+	trxNo uint          // last trx number for trx scope
+}
+
+var _ Generator = &ScopedGenerator{}
+
+func NewScopedGenerator(g Generator) *ScopedGenerator {
+	return &ScopedGenerator{
+		g: g,
+		s: g.Id().Scope,
+	}
+}
+
+func (g *ScopedGenerator) Id() Id                     { return g.g.Id() }
+func (g *ScopedGenerator) Format() string             { return g.g.Format() }
+func (g *ScopedGenerator) Scan(any interface{}) error { return g.g.Scan(any) }
+
+func (g *ScopedGenerator) Copy(r finch.RunLevel) Generator {
+	return NewScopedGenerator(g.g.Copy(r))
+}
+
+func (g *ScopedGenerator) Values(c finch.ExecCount) []interface{} {
+	switch g.s {
+	case finch.SCOPE_TRX:
+		if c[finch.TRX] > g.trxNo { // new trx
+			g.trxNo = c[finch.TRX]
+			g.vals = g.g.Values(c)
+		}
+	default:
+		g.vals = g.g.Values(c)
+	}
+	return g.vals
+}

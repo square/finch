@@ -1,4 +1,4 @@
-// Copyright 2022 Block, Inc.
+// Copyright 2023 Block, Inc.
 
 package data
 
@@ -97,7 +97,11 @@ func (g *RandInt) Values(_ finch.ExecCount) []interface{} {
 		}
 		return []interface{}{v}
 	default: // uniform
-		return []interface{}{rand.Int63n(g.max)}
+		v := rand.Int63n(g.max)
+		if v < g.min {
+			v = g.min
+		}
+		return []interface{}{v}
 	}
 }
 

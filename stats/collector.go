@@ -1,8 +1,9 @@
-// Copyright 2022 Block, Inc.
+// Copyright 2023 Block, Inc.
 
 package stats
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -25,6 +26,20 @@ type Instance struct {
 	Trx      map[string]*Stats // per trx stats
 }
 
+// Combine combines instance stats for the same interval.
+func (in *Instance) Combine(from []Instance) {
+	in.Hostname = fmt.Sprintf("(%d combined)", len(from))
+	in.Clients = from[0].Clients
+	in.Interval = from[0].Interval
+	in.Seconds = from[0].Seconds
+	in.Runtime = from[0].Runtime
+	in.Total.Copy(from[0].Total) // copy the first
+	for i := range from[1:] {    // combine the rest
+		in.Total.Combine(from[1+i].Total)
+		in.Clients += from[1+i].Clients
+	}
+}
+
 // Collector collects and reports stats from local and remote instances.
 // If config.stats.freq is set, stats are collected/reported at that frequency.
 // Else, they're collected/reported once when the stage finishes.
@@ -35,13 +50,15 @@ type Collector struct {
 	local      Instance   // local instance stats
 	interval   []Instance // all Instance stats
 	n          uint       // index in interval
-	nInstances uint       // number of intances in interval
+	nInstances uint       // number of instances in interval
 	intervalNo uint       // current interval being filled
 	stopChan   chan struct{}
 	doneChan   chan struct{}
 	start      time.Time // when Start was called
 	last       time.Time // when Collect was last called
 	reporters  []Reporter
+	stopped    bool
+	finalChan  chan struct{}
 }
 
 func NewCollector(cfg config.Stats, hostname string, nInstances uint) (*Collector, error) {
@@ -66,7 +83,12 @@ func NewCollector(cfg config.Stats, hostname string, nInstances uint) (*Collecto
 		nInstances: nInstances,
 		reporters:  reporters,
 		intervalNo: 1,
+		finalChan:  make(chan struct{}),
 	}, nil
+}
+
+func (c *Collector) Done() chan struct{} {
+	return c.finalChan
 }
 
 // Watch all trx stats from one client. This must be called for each Client
@@ -119,6 +141,7 @@ func (c *Collector) Start() {
 // stats are enabled (config.stats.freq > 0).
 func (c *Collector) Stop() {
 	finch.Debug("stop")
+	c.stopped = true
 	if c.freq > 0 {
 		// Handle reporting race condition. Support freq=2s and runtime=2s.
 		// When run ends, either the ticker in that ^ goroutine can exec first
@@ -142,7 +165,7 @@ func (c *Collector) Stop() {
 
 // Collect collects stats from all clients. It's called periodically by the
 // goroutine in Start, or once by Stop if periodic stats aren't enabled.
-func (c *Collector) Collect() {
+func (c *Collector) Collect() bool {
 	finch.Debug("collect")
 
 	// End of this interval
@@ -189,14 +212,14 @@ func (c *Collector) Collect() {
 	// to 127.0.0.1. This abstraction is needed for remote instances reporting
 	// their stats to this instance, which happens when compute/Server.remoteStats
 	// calls Recv, passing remote stats.
-	c.Recv(c.local)
+	return c.Recv(c.local)
 }
 
 // Recv receives stats from one local or remote client. If local, it's called by
-// Collect. If remote, it's called by computer/Server.remoteStats after receiving
+// Collect. If remote, it's called by compute/Server.remoteStats after receiving
 // stats from the remote instance. Stats are reported when the interval is complete
 // (when N stats from N instances have been received); until then, they're buffered.
-func (c *Collector) Recv(in Instance) {
+func (c *Collector) Recv(in Instance) bool {
 	finch.Debug("recv %+v", in)
 
 	// Is the received interval in the past? This can happen for stats from remote
@@ -205,7 +228,7 @@ func (c *Collector) Recv(in Instance) {
 	// out of order, we just have to drop the old/delayed interval.
 	if in.Interval < c.intervalNo {
 		log.Printf("Discarding past stats: %+v", in)
-		return
+		return false
 	}
 
 	// Reverse of above: is received interval in the future? If yes, then report
@@ -217,19 +240,21 @@ func (c *Collector) Recv(in Instance) {
 		c.report()
 		c.interval[0] = in
 		c.n = 1
-		return
+		return true
 	}
 
 	// Stats in current interval; buffer until we've received all stats
 	c.interval[c.n] = in
 	c.n += 1
 	if c.n < c.nInstances {
-		return // wait for more stats in this interval
+		finch.Debug("have %d of %d", c.n, c.nInstances)
+		return false // wait for more stats in this interval
 	}
 
 	// Received all stats in this interval
 	finch.Debug("interval %d complete", c.intervalNo)
 	c.report()
+	return true
 }
 
 func (c *Collector) report() {
@@ -238,4 +263,7 @@ func (c *Collector) report() {
 	}
 	c.intervalNo += 1
 	c.n = 0
+	if c.stopped {
+		close(c.finalChan)
+	}
 }

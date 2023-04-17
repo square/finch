@@ -1,4 +1,4 @@
-// Copyright 2022 Block, Inc.
+// Copyright 2023 Block, Inc.
 
 package stats
 
@@ -9,16 +9,24 @@ import (
 	"text/tabwriter"
 
 	h "github.com/dustin/go-humanize"
+	"github.com/square/finch"
 )
 
 // Stdout is a Reporter that prints stats to STDOUT. This is the default when
 // config.stats is not set.
+//
+//	stats:
+//	  report:
+//	    stdout:
+//	      each-instance: true
+//	      combined: true
 type Stdout struct {
-	p          []float64
-	perCompute bool
-	w          *tabwriter.Writer
-	header     string
-	total      *Stats
+	p        []float64
+	w        *tabwriter.Writer
+	header   string
+	all      *Instance
+	each     bool
+	combined bool
 }
 
 var _ Reporter = &Stdout{}
@@ -37,41 +45,41 @@ func NewStdout(opts map[string]string) (*Stdout, error) {
 	)
 	header = strings.ReplaceAll(header, ",", "\t")
 	r := &Stdout{
-		p:          nP,
-		perCompute: opts["per-compute"] == "yes",
-		w:          tabwriter.NewWriter(os.Stdout, 1, 0, 1, ' ', tabwriter.AlignRight|tabwriter.Debug),
-		header:     header,
+		p:        nP,
+		w:        tabwriter.NewWriter(os.Stdout, 1, 0, 1, ' ', tabwriter.AlignRight|tabwriter.Debug),
+		header:   header,
+		each:     finch.Bool(opts["each-instance"]),
+		combined: finch.Bool(opts["combined"]),
 	}
-	if !r.perCompute {
-		r.total = NewStats()
+	if r.each == false && r.combined == false {
+		r.combined = true
+	}
+	if r.combined {
+		r.all = &Instance{
+			Total: NewStats(),
+			// We don't use Trx stats yet
+		}
 	}
 	return r, nil
 }
 
 func (r *Stdout) Report(from []Instance) {
 	fmt.Fprintln(r.w, r.header)
-
-	// Stats per compute, if enabled
-	if r.perCompute {
+	if r.each {
 		for i := range from {
-			r.print(from[i].Total, from[i], from[i].Hostname)
+			r.print(&from[i])
 		}
-	} else {
-		from[0].Total.Copy(r.total)
-		for i := range from[1:] {
-			r.total.Combine(from[1+i].Total)
-		}
-		compute := from[0].Hostname
-		if len(from) > 1 {
-			compute = fmt.Sprintf("(%d combined)", len(from))
-		}
-		r.print(r.total, from[0], compute)
+	}
+	if r.combined && len(from) > 1 {
+		r.all.Combine(from)
+		r.print(r.all)
 	}
 	r.w.Flush()
 	fmt.Println()
 }
 
-func (r *Stdout) print(s *Stats, in Instance, hostname string) {
+func (r *Stdout) print(in *Instance) {
+	s := in.Total
 	line := fmt.Sprintf("%d\t%1.f\t%d\t%d\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\n",
 		in.Interval,
 		in.Seconds, // duration (of interval)
@@ -102,8 +110,7 @@ func (r *Stdout) print(s *Stats, in Instance, hostname string) {
 		// P
 		h.Comma(s.Max[COMMIT]),
 
-		// Compute (hostname)
-		hostname,
+		in.Hostname,
 	)
 
 	// Replace P in Fmt with the CSV percentile values

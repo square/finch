@@ -70,9 +70,10 @@ func Load(trxList []config.Trx, scope *data.Scope) (*Set, error) {
 var ErrEOF = fmt.Errorf("EOF")
 
 type lineBuf struct {
-	n    uint
-	str  string
-	mods []string
+	n      uint
+	str    string
+	mods   []string
+	copyNo uint
 }
 
 type File struct {
@@ -287,13 +288,13 @@ func (f *File) statement() ([]*Statement, error) {
 				}
 				s.Outputs = append(s.Outputs, dataKey)
 			}
-		case "copy":
+		case "copies":
 			n, err := strconv.Atoi(m[1])
 			if err != nil {
-				return nil, fmt.Errorf("copy: %s invalid: %s", m[1], err)
+				return nil, fmt.Errorf("copies: %s invalid: %s", m[1], err)
 			}
 			if n < 0 {
-				return nil, fmt.Errorf("copy: %s invalid: must be >= 0", m[1])
+				return nil, fmt.Errorf("copies: %s invalid: must be >= 0", m[1])
 			}
 			if n == 0 {
 				return nil, nil
@@ -304,10 +305,10 @@ func (f *File) statement() ([]*Statement, error) {
 			prepareMulti := false
 			mods := make([]string, 0, len(f.lb.mods)-1)
 			for _, mod := range f.lb.mods {
-				if strings.HasPrefix(mod, "copy") {
+				if strings.HasPrefix(mod, "copies") {
 					continue
 				}
-				if strings.HasPrefix(mod, "prepare") {
+				if strings.HasPrefix(mod, "prepare") && !strings.Contains(query, "%{COPY_NUMBER}") {
 					prepareMulti = true
 				}
 				mods = append(mods, mod)
@@ -316,7 +317,8 @@ func (f *File) statement() ([]*Statement, error) {
 			f.stmtNo--
 			multi := make([]*Statement, n)
 			for i := 0; i < n; i++ {
-				finch.Debug("multi %d of %d", i+1, n)
+				finch.Debug("copy %d of %d", i+1, n)
+				f.lb.copyNo = uint(i + 1)
 				ms, err := f.statement() // recurse
 				if err != nil {
 					return nil, fmt.Errorf("during copy recurse: %s", err)
@@ -326,6 +328,7 @@ func (f *File) statement() ([]*Statement, error) {
 			if prepareMulti {
 				multi[0].PrepareMulti = n
 			}
+			f.lb.copyNo = 0
 			return multi, nil
 		default:
 			return nil, fmt.Errorf("unknown modifier: %s: '%s'", m[0], mod)
@@ -351,6 +354,8 @@ func (f *File) statement() ([]*Statement, error) {
 		csv := strings.Join(vals, ", ")
 		query = reCSV.ReplaceAllLiteralString(query, csv)
 	}
+
+	query = strings.ReplaceAll(query, "%{COPY_NUMBER}", fmt.Sprintf("%d", f.lb.copyNo))
 
 	// ----------------------------------------------------------------------
 	// Data keys: @d -> data.Generator

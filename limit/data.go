@@ -89,13 +89,7 @@ func NewRows(max, offset int64) *Rows {
 
 func (lm *Rows) Affected(n int64) {
 	lm.Lock()
-	switch {
-	case n == 1:
-	case n > 1:
-		lm.n += n - 1
-	case n == 0:
-		lm.n -= 1
-	}
+	lm.n += n
 	// Report progress every r%
 	p := float64(lm.n) / float64(lm.max) * 100
 	if p-lm.p > float64(lm.r) {
@@ -117,7 +111,6 @@ func (lm *Rows) More(_ *sql.Conn) bool {
 		lm.t = time.Now()
 	}
 	more := lm.n < lm.max
-	lm.n++
 	lm.Unlock()
 	return more
 }
@@ -183,6 +176,9 @@ func (lm *Size) More(conn *sql.Conn) bool {
 	lm.Lock()
 	defer lm.Unlock()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	// Set queries on first call
 	if lm.query == "" {
 		lm.query = "SELECT COALESCE(data_length + index_length, 0) AS bytes FROM information_schema.TABLES WHERE "
@@ -191,7 +187,7 @@ func (lm *Size) More(conn *sql.Conn) bool {
 			lm.query += "table_schema='" + lm.db + "'"
 
 			var tbls []string
-			rows, err := conn.QueryContext(context.Background(), "SHOW FULL TABLES")
+			rows, err := conn.QueryContext(ctx, "SHOW FULL TABLES")
 			if err != nil {
 				log.Printf("Error running SHOW FULL TABLES: %s", err)
 				return false
@@ -211,7 +207,7 @@ func (lm *Size) More(conn *sql.Conn) bool {
 			lm.analyze = "ANALYZE TABLE " + strings.Join(tbls, ", ")
 		} else {
 			log.Printf("Table size limit: %s %s (progress report every %d%%)", lm.tbl, lm.maxStr, lm.r)
-			err := conn.QueryRowContext(context.Background(), "SELECT DATABASE()").Scan(&lm.db)
+			err := conn.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&lm.db)
 			if err != nil {
 				log.Printf("Error getting current database: %s", err)
 				return false
@@ -231,14 +227,14 @@ func (lm *Size) More(conn *sql.Conn) bool {
 		return true // not time to check; presume there's more to load
 	}
 
-	if _, err := conn.ExecContext(context.Background(), lm.analyze); err != nil {
+	if _, err := conn.ExecContext(ctx, lm.analyze); err != nil {
 		log.Printf("Error running ANALYZE TABLE: %s", err)
 		return false
 	}
 
 	// Get database/table size in bytes
 	var bytes uint64
-	err := conn.QueryRowContext(context.Background(), lm.query).Scan(&bytes)
+	err := conn.QueryRowContext(ctx, lm.query).Scan(&bytes)
 	if err != nil {
 		log.Printf("Error query data size: %s", err)
 		return false

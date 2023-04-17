@@ -1,4 +1,4 @@
-// Copyright 2022 Block, Inc.
+// Copyright 2023 Block, Inc.
 
 package compute
 
@@ -151,17 +151,11 @@ func (comp *Client) Run(ctx context.Context) error {
 		}
 
 		log.Printf("Running stage %s", stageName)
-		if stageName == finch.STAGE_BENCHMARK {
-			go comp.stats.Start()
-		}
 		err = comp.local.Run(ctx, stageName)
 		if err != nil {
 			log.Printf("Error running stage %s: %s", stageName, err)
 			log.Println("Sending error signal")
 			comp.client.Error(err)
-		}
-		if stageName == finch.STAGE_BENCHMARK {
-			comp.stats.Stop()
 		}
 
 		log.Println("Sending stage-done signal")

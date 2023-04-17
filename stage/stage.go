@@ -1,4 +1,4 @@
-// Copyright 2022 Block, Inc.
+// Copyright 2023 Block, Inc.
 
 package stage
 
@@ -161,6 +161,8 @@ EXEC_GROUPS:
 
 	if s.stats != nil {
 		s.stats.Stop()
+		log.Println("Waiting for final report...")
+		<-s.stats.Done()
 	}
 
 	return nil

@@ -278,3 +278,51 @@ func TestLoad_copy3(t *testing.T) {
 		t.Logf("got: %#v", got)
 	}
 }
+
+func TestLoad_COPY_NUMBER(t *testing.T) {
+	// @COPY_NUMBER should be replaced with the copy number
+	expect := &trx.Set{
+		Order: []string{"copyNo"},
+		Statements: map[string][]*trx.Statement{
+			"copyNo": []*trx.Statement{
+				{
+					Trx:       "copyNo",
+					Query:     "select c from t1 where id=1",
+					ResultSet: true,
+				},
+				{
+					Trx:       "copyNo",
+					Query:     "select c from t2 where id=1",
+					ResultSet: true,
+				},
+			},
+		},
+		Data: &data.Scope{
+			Keys:     map[string]data.Key{},
+			CopiedAt: map[string]finch.RunLevel{},
+		},
+	}
+
+	trxList := []config.Trx{
+		{
+			Name: "copyNo", // must set because we don't call Validate
+			File: "../test/trx/copy-no.sql",
+			Data: map[string]config.Data{
+				"id": {
+					Generator: "rand-int",
+					Scope:     "trx",
+				},
+			},
+		},
+	}
+
+	scope := data.NewScope()
+	got, err := trx.Load(trxList, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := deep.Equal(got, expect); diff != nil {
+		t.Error(diff)
+		t.Logf("got: %#v", got)
+	}
+}

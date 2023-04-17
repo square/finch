@@ -1,3 +1,5 @@
+// Copyright 2023 Block, Inc.
+
 package data_test
 
 import (
@@ -8,11 +10,12 @@ import (
 )
 
 func TestXid_TrxScope(t *testing.T) {
-	g := data.NewXid(data.Id{
-		Scope:   finch.SCOPE_TRX,
-		Type:    "xid",
-		DataKey: "@d",
-	})
+	g := data.NewScopedGenerator(
+		data.NewXid(data.Id{
+			Scope:   finch.SCOPE_TRX,
+			Type:    "xid",
+			DataKey: "@d",
+		}))
 
 	r := finch.ExecCount{}
 	r[finch.TRX] = 1

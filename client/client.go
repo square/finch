@@ -1,4 +1,4 @@
-// Copyright 2022 Block, Inc.
+// Copyright 2023 Block, Inc.
 
 package client
 
@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"sync/atomic"
 	"time"
+
+	myerr "github.com/go-mysql/errors"
 
 	"github.com/square/finch"
 	"github.com/square/finch/stats"
@@ -51,12 +53,17 @@ func (c *Client) Init() error {
 	return nil
 }
 
-func (c *Client) Connect(ctx context.Context, cerr error) bool {
+func (c *Client) Connect(ctx context.Context, cerr error, query string) bool {
+	if cerr != nil {
+		if _, e := myerr.Error(cerr); e == myerr.ErrDupeKey {
+			log.Printf("Client %s duplciate key, ignorning: %v (%s)", c.RunLevel.ClientId(), cerr, query)
+			return true
+		}
+		log.Printf("Client %s connection error: %s (%s)", c.RunLevel.ClientId(), cerr, query)
+	}
+	// Need to close ps and then re-prep
 	if c.conn != nil {
 		c.conn.Close()
-	}
-	if cerr != nil {
-		log.Printf("Client %s connection error: %s", c.RunLevel.ClientId(), cerr)
 	}
 	t0 := time.Now()
 	for i := 0; i < 100; i++ {
@@ -107,6 +114,18 @@ func (c *Client) Prepare(ctxExec context.Context) error {
 	return nil
 }
 
+func (c *Client) Cleanup() {
+	// Must close prepared statments before returning to DoneChan to ensure
+	// Finch doesn't exit before we're closed them, else we'll leak them in
+	// MySQL.
+	for i := range c.ps {
+		if c.ps[i] == nil {
+			continue
+		}
+		c.ps[i].Close()
+	}
+}
+
 func (c *Client) Run(ctxExec context.Context) {
 	finch.Debug("run client %s: %d stmts, runtime %s, iters %d/%d/%d", c.RunLevel.ClientId(), len(c.Statements), c.IterExecGroup, c.IterClients, c.Iter)
 
@@ -119,15 +138,6 @@ func (c *Client) Run(ctxExec context.Context) {
 			n := runtime.Stack(b, false)
 			err = fmt.Errorf("PANIC: %v\n%s", r, string(b[0:n]))
 		}
-		// Must close prepared statments before returning to DoneChan to ensure
-		// Finch doesn't exit before we're closed them, else we'll leak them in
-		// MySQL.
-		for i := range c.ps {
-			if c.ps[i] == nil {
-				continue
-			}
-			c.ps[i].Close()
-		}
 		// If the runtime elapses, err can be a "context canceled" error,
 		// which we can ignore.
 		if !runtimeElapsed {
@@ -136,11 +146,11 @@ func (c *Client) Run(ctxExec context.Context) {
 		c.DoneChan <- c
 	}()
 
-	c.Connect(ctxExec, nil)
-
+	c.Connect(ctxExec, nil, "")
 	if err = c.Prepare(ctxExec); err != nil {
 		return
 	}
+	defer c.Cleanup()
 
 	var rows *sql.Rows
 	var res sql.Result
@@ -227,8 +237,7 @@ ITER:
 						err = nil
 						return
 					}
-					err = fmt.Errorf("querying %s: %w", c.Statements[i].Query, err)
-					if !c.Connect(ctxExec, err) {
+					if !c.Connect(ctxExec, err, c.Statements[i].Query) {
 						return
 					}
 					continue ITER
@@ -237,8 +246,7 @@ ITER:
 					for rows.Next() {
 						if err = rows.Scan(c.Data[i].Outputs...); err != nil {
 							rows.Close()
-							err = fmt.Errorf("scanning result set of %s: %w", c.Statements[i].Query, err)
-							if !c.Connect(ctxExec, err) {
+							if !c.Connect(ctxExec, err, c.Statements[i].Query) {
 								return
 							}
 							continue ITER
@@ -278,8 +286,7 @@ ITER:
 						err = nil
 						return
 					}
-					err = fmt.Errorf("executing %s: %w", c.Statements[i].Query, err)
-					if !c.Connect(ctxExec, err) {
+					if !c.Connect(ctxExec, err, c.Statements[i].Query) {
 						return
 					}
 					continue ITER

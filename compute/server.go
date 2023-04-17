@@ -1,4 +1,4 @@
-// Copyright 2022 Block, Inc.
+// Copyright 2023 Block, Inc.
 
 package compute
 
@@ -169,7 +169,9 @@ func (s *Server) Boot(ctxFinch context.Context, cfg config.File) error {
 
 // Run runs all the stages on all the instances (local and remote).
 func (s *Server) Run(ctxFinch context.Context) error {
-	// Run setup on local only
+	// ----------------------------------------------------------------------
+	// SETUP
+	// ----------------------------------------------------------------------
 	if !s.cfg.Setup.Disable && len(s.cfg.Setup.Trx) > 0 && s.local != nil {
 		if err := s.local.Run(ctxFinch, finch.STAGE_SETUP); err != nil {
 			return err
@@ -192,38 +194,34 @@ func (s *Server) Run(ctxFinch context.Context) error {
 	}
 	// ----------------------------------------------------------------------
 
-	// Tell remotes they're done
-	s.Lock()
-	s.done = true
-	s.Unlock()
+	// Wait for all remotes to disconnected
+	if s.haveRemotes {
+		// Tell remotes they're done
+		s.Lock()
+		s.done = true
+		s.Unlock()
+		connected := len(s.remotes)
+		for connected > 0 {
+			select {
+			case <-ctxFinch.Done():
+				return nil
+			default:
+			}
+			s.Lock()
+			connected = len(s.remotes)
+			s.Unlock()
+			log.Printf("%d remotes still connected...", connected)
+			time.Sleep(1 * time.Second)
+		}
+	}
 
-	// Run cleanup on local only
+	// ----------------------------------------------------------------------
+	// CLEANUP
+	// ----------------------------------------------------------------------
 	if !s.cfg.Cleanup.Disable && len(s.cfg.Cleanup.Trx) > 0 && s.local != nil {
 		if err := s.local.Run(ctxFinch, finch.STAGE_CLEANUP); err != nil {
 			return err
 		}
-	}
-
-	// Wait for all remotes to disconnected
-	if !s.haveRemotes {
-		return nil
-	}
-
-WAIT:
-	for {
-		select {
-		case <-ctxFinch.Done():
-			break WAIT
-		default:
-		}
-		s.Lock()
-		connected := len(s.remotes)
-		s.Unlock()
-		if connected == 0 {
-			break WAIT
-		}
-		log.Printf("%d remotes still connected...", connected)
-		time.Sleep(1 * time.Second)
 	}
 
 	return nil
@@ -285,7 +283,6 @@ func (s *Server) remoteBoot(w http.ResponseWriter, r *http.Request) {
 
 	// Load remote state
 	s.Lock()
-	defer s.Unlock()
 	if _, ok := s.remotes[name]; !ok {
 		if get {
 			// New remote instance
@@ -293,10 +290,12 @@ func (s *Server) remoteBoot(w http.ResponseWriter, r *http.Request) {
 			//   @todo handle duplicate names
 			s.remotes[name] = &remote{name: name}
 		} else {
+			s.Unlock()
 			unknownRemote(w, name)
 			return
 		}
 	}
+	s.Unlock()
 
 	// POST /boot: remote is ack'ing that previous GET /boot completed successfully
 	if !get {
@@ -342,10 +341,7 @@ func (s *Server) remoteStop(w http.ResponseWriter, r *http.Request) {
 
 	// GET /stop: remote is checking if it's ok to keep running
 	if get {
-		s.Lock()
-		stop := s.stop
-		s.Unlock()
-		if stop {
+		if s.stop {
 			w.WriteHeader(http.StatusNoContent) // remote should stop
 		} else {
 			w.WriteHeader(http.StatusOK) // remote is ok to keep running
@@ -365,12 +361,13 @@ func (s *Server) remoteFile(w http.ResponseWriter, r *http.Request) {
 		return // clientName() wrote error response
 	}
 	s.Lock()
-	defer s.Unlock()
 	if _, ok := s.remotes[name]; !ok {
+		s.Unlock()
 		// @todo: unknown instance, didn't POST /boot first
 		w.WriteHeader(http.StatusUnauthorized) // unknown remote
 		return
 	}
+	s.Unlock()
 
 	// Parse file ref 'stage=...&i=...' from URL
 	q := r.URL.Query()
@@ -454,9 +451,9 @@ func (s *Server) remoteRun(w http.ResponseWriter, r *http.Request) {
 
 	s.Lock()
 	if _, ok := s.remotes[name]; !ok {
+		s.Unlock()
 		log.Printf("Uknown remote: %s", name)
 		w.WriteHeader(http.StatusUnauthorized) // unknown remote
-		s.Unlock()
 		return
 	}
 	s.Unlock()
@@ -467,7 +464,6 @@ func (s *Server) remoteRun(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			log.Printf("error reading error from remote: %s", err)
-			s.Unlock()
 			return
 		}
 		r.Body.Close()
@@ -496,11 +492,11 @@ func (s *Server) remoteRun(w http.ResponseWriter, r *http.Request) {
 		if stageName != "" {
 			break
 		}
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
-	log.Printf("Starting remote %s on stage %s\n", name, s.stage)
 	w.Write([]byte(s.stage))
+	log.Printf("Started remote %s on stage %s\n", name, s.stage)
 }
 
 func (s *Server) remoteStats(w http.ResponseWriter, r *http.Request) {
@@ -509,12 +505,13 @@ func (s *Server) remoteStats(w http.ResponseWriter, r *http.Request) {
 		return // clientName() wrote error response
 	}
 	s.Lock()
-	defer s.Unlock()
 	if _, ok := s.remotes[name]; !ok {
+		s.Unlock()
 		// @todo: unknown instance, didn't POST /boot first
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
+	s.Unlock()
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {

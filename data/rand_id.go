@@ -1,4 +1,4 @@
-// Copyright 2022 Block, Inc.
+// Copyright 2023 Block, Inc.
 
 package data
 
@@ -9,18 +9,13 @@ import (
 )
 
 type Xid struct {
-	id    Id
-	trxNo uint
-	val   string
+	id  Id
+	val string
 }
 
 var _ Generator = &Xid{}
 
 func NewXid(id Id) *Xid {
-	// Set default scope if not explicitly configured
-	if id.Scope == "" {
-		id.Scope = finch.SCOPE_TRX
-	}
 	return &Xid{
 		id: id,
 	}
@@ -35,14 +30,5 @@ func (g *Xid) Copy(r finch.RunLevel) Generator {
 }
 
 func (g *Xid) Values(c finch.ExecCount) []interface{} {
-	switch g.id.Scope {
-	case finch.SCOPE_TRX:
-		if c[finch.TRX] > g.trxNo { // new trx
-			g.trxNo = c[finch.TRX]
-			g.val = xid.New().String()
-		}
-	default:
-		g.val = xid.New().String()
-	}
-	return []interface{}{g.val}
+	return []interface{}{xid.New().String()}
 }
