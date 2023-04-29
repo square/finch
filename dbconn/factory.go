@@ -88,7 +88,7 @@ func (f *factory) setDSN() error {
 		if err != nil {
 			return err
 		}
-		f.cfg.ApplyDefaults(def)
+		f.cfg.With(def)
 	}
 
 	// ----------------------------------------------------------------------

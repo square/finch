@@ -7,84 +7,145 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io/ioutil"
-	"os"
 	"path/filepath"
-	"strings"
 )
 
-// File is the config file format including all sub-sections.
-type File struct {
-	MySQL   MySQL   `yaml:"mysql,omitempty"`
-	Compute Compute `yaml:"compute,omitempty"`
-	Stats   Stats   `yaml:"stats,omitempty"`
-
-	Setup     Stage `yaml:"setup,omitempty"`
-	Warmup    Stage `yaml:"warmup,omitempty"`
-	Benchmark Stage `yaml:"benchmark,omitempty"`
-	Cleanup   Stage `yaml:"cleanup,omitempty"`
+// Base represents a base config file: _all.yaml. If it exists, it applies to
+// all stage config files in the directory.
+type Base struct {
+	MySQL  MySQL             `yaml:"mysql,omitempty"`
+	Params map[string]string `yaml:"params,omitempty"`
+	Stats  Stats             `yaml:"stats,omitempty"`
 }
 
-func (c *File) Validate() error {
+func (c *Base) Validate() error {
 	if err := c.MySQL.Validate(); err != nil {
-		return err
-	}
-	if err := c.Compute.Validate(); err != nil {
 		return err
 	}
 	if err := c.Stats.Validate(); err != nil {
 		return err
 	}
+	return nil
+}
 
-	// Stages
-	if err := c.Setup.Validate("setup"); err != nil {
+// Stage represents one stage config file. The stage config overwrites any base
+// config (_all.yaml).
+type Stage struct {
+	Compute  Compute           `yaml:"compute,omitempty"`
+	Disable  bool              `yaml:"disable"`
+	FileName string            `yaml:"-"`
+	Name     string            `yaml:"name"`
+	MySQL    MySQL             `yaml:"mysql,omitempty"`
+	N        uint              `yaml:"-"`
+	Params   map[string]string `yaml:"params,omitempty"`
+	QPS      string            `yaml:"qps,omitempty"` // uint
+	Runtime  string            `yaml:"runtime,omitempty"`
+	Stats    Stats             `yaml:"stats,omitempty"`
+	TPS      string            `yaml:"tps,omitempty"` // uint
+	Trx      []Trx             `yaml:"trx,omitempty"`
+	Workload []ClientGroup     `yaml:"workload,omitempty"`
+}
+
+func NewStage(fileName string, n int, b *Base) Stage {
+	c := Stage{
+		FileName: fileName,
+		N:        uint(n),
+	}
+	if b == nil {
+		return c
+	}
+
+	// Apply base config to stage before reading stage config file. This means
+	// any base config values are overwritten if set in the stage config file.
+	if len(b.Params) > 0 {
+		c.Params = map[string]string{}
+		for k, v := range b.Params {
+			c.Params[k] = v
+		}
+	}
+
+	// Shallow copy MySQL because it has no maps or slices, but setBool to create
+	// new *bool pointers
+	c.MySQL = b.MySQL
+	c.MySQL.DisableAutoTLS = setBool(c.MySQL.DisableAutoTLS, b.MySQL.DisableAutoTLS)
+	c.MySQL.TLS.SkipVerify = setBool(c.MySQL.TLS.SkipVerify, b.MySQL.TLS.SkipVerify)
+	c.MySQL.TLS.Disable = setBool(c.MySQL.TLS.Disable, b.MySQL.TLS.Disable)
+
+	// Stats has a map, so copy in all fields manually
+	c.Stats.Disable = setBool(c.Stats.Disable, b.Stats.Disable)
+	c.Stats.Freq = b.Stats.Freq
+	if len(b.Stats.Report) > 0 {
+		c.Stats.Report = map[string]map[string]string{}
+		for r := range b.Stats.Report {
+			c.Stats.Report[r] = map[string]string{}
+			for k, v := range b.Stats.Report[r] {
+				c.Stats.Report[r][k] = v
+			}
+		}
+	}
+
+	return c
+}
+
+func (c *Stage) Vars() error {
+	var err error
+	c.Name, err = Vars(c.Name, c.Params)
+	if err != nil {
 		return err
 	}
-	if err := c.Warmup.Validate("warmup"); err != nil {
+	c.Runtime, err = Vars(c.Runtime, c.Params)
+	if err != nil {
 		return err
 	}
-	if err := c.Benchmark.Validate("benchmark"); err != nil {
+	c.QPS, err = Vars(c.QPS, c.Params)
+	if err != nil {
 		return err
 	}
-	if err := c.Cleanup.Validate("cleanup"); err != nil {
+	c.TPS, err = Vars(c.TPS, c.Params)
+	if err != nil {
 		return err
+	}
+
+	if err := c.Compute.Vars(c.Params); err != nil {
+		return fmt.Errorf("in compute: %s", err)
+	}
+	if err := c.MySQL.Vars(c.Params); err != nil {
+		return fmt.Errorf("in mysql: %s", err)
+	}
+	if err := c.Stats.Vars(c.Params); err != nil {
+		return fmt.Errorf("in stats: %s", err)
+	}
+
+	for k, v := range c.Params {
+		c.Params[k], err = Vars(v, c.Params)
+		if err != nil {
+			return fmt.Errorf("in params: %s", err)
+		}
+	}
+	for i := range c.Trx {
+		if err := c.Trx[i].Vars(c.Params); err != nil {
+			return fmt.Errorf("in trx: %s", err)
+		}
+	}
+	for i := range c.Workload {
+		if err := c.Workload[i].Vars(c.Params); err != nil {
+			return fmt.Errorf("in workload: %s", err)
+		}
 	}
 	return nil
 }
 
-// --------------------------------------------------------------------------
-
-type Stage struct {
-	Name    string
-	Runtime string `yaml:"runtime,omitempty"`
-	Script  string `yaml:"script,omitempty"`
-	QPS     uint   `yaml:"qps,omitempty"`
-	TPS     uint   `yaml:"tps,omitempty"`
-
-	Workload []ClientGroup `yaml:"workload,omitempty"`
-	Trx      []Trx         `yaml:"trx,omitempty"`
-
-	Disable bool `yaml:"disable"`
-}
-
-type Trx struct {
-	Name string
-	File string
-	Data map[string]Data
-}
-
-func (c *Stage) Validate(name string) error {
-	c.Name = name // used for logging
+func (c *Stage) Validate() error {
 	if c.Disable {
 		return nil
 	}
 
-	if len(c.Trx) == 0 && len(c.Workload) == 0 {
-		c.Disable = true
-		return nil
+	if c.Name == "" {
+		c.Name = filepath.Base(c.FileName)
 	}
 
 	if len(c.Trx) == 0 {
-		return fmt.Errorf("stage %s has zero trx files and is not disabled; specify at least 1 trx file or %s.disable = true", name, name)
+		return fmt.Errorf("stage %s has zero trx files and is not disabled; specify at least 1 trx file or %s.disable = true", c.Name, c.Name)
 	}
 
 	// Trx list: must validate before Workload because Workload reference trx by name
@@ -114,7 +175,7 @@ func (c *Stage) Validate(name string) error {
 				names[c.Workload[i].Name] = i
 			} else {
 				if last != i-1 {
-					return fmt.Errorf("duplicate or non-consecutive execution group name: %s: first at %s.workload[%d], then at %s.workoad[%d]; unique group names must consecutive", c.Workload[i].Name, name, last, name, i)
+					return fmt.Errorf("duplicate or non-consecutive execution group name: %s: first at %s.workload[%d], then at %s.workoad[%d]; unique group names must consecutive", c.Workload[i].Name, c.Name, last, c.Name, i)
 				}
 			}
 		}
@@ -128,7 +189,7 @@ func (c *Stage) Validate(name string) error {
 						continue TRX
 					}
 				}
-				return fmt.Errorf("%s.workload[%d].trx[%d]: '%s' not defined in %s.trx", name, i, j, trxName, name)
+				return fmt.Errorf("%s.workload[%d].trx[%d]: '%s' not defined in %s.trx", c.Name, i, j, trxName, c.Name)
 			}
 		} else {
 			withoutTrx[i] = i
@@ -136,7 +197,7 @@ func (c *Stage) Validate(name string) error {
 	}
 
 	if len(withTrx) > 0 && len(withoutTrx) > 0 {
-		return fmt.Errorf("%s.workload has mixed trx assignments", name)
+		return fmt.Errorf("%s.workload has mixed trx assignments", c.Name)
 	}
 
 	// Runtime
@@ -144,9 +205,79 @@ func (c *Stage) Validate(name string) error {
 		return err
 	}
 
-	// Script
-	// @todo
+	if err := parseInt(c.QPS); err != nil {
+		return fmt.Errorf("tps: '%s' is not an integer: %s", c.QPS, err)
+	}
+	if err := parseInt(c.TPS); err != nil {
+		return fmt.Errorf("tps: '%s' is not an integer: %s", c.TPS, err)
+	}
 
+	if err := c.MySQL.Validate(); err != nil {
+		return err
+	}
+
+	if err := c.Compute.Validate(); err != nil {
+		return err
+	}
+
+	if err := c.Stats.Validate(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// --------------------------------------------------------------------------
+
+type Compute struct {
+	DisableLocal bool   `yaml:"disable-local,omitempty"`
+	Instances    string `yaml:"instances,omitempty"` // uint
+}
+
+func (c *Compute) Vars(params map[string]string) error {
+	var err error
+	c.Instances, err = Vars(c.Instances, params)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Compute) Validate() error {
+	if err := parseInt(c.Instances); err != nil {
+		return fmt.Errorf("instances: '%s' is not an integer: %s", c.Instances, err)
+	}
+	if c.Instances == "" {
+		c.Instances = "1"
+	}
+	return nil
+}
+
+// --------------------------------------------------------------------------
+
+type Trx struct {
+	Name string
+	File string
+	Data map[string]Data
+}
+
+func (c *Trx) Vars(params map[string]string) error {
+	var err error
+	c.Name, err = Vars(c.Name, params)
+	if err != nil {
+		return err
+	}
+	c.File, err = Vars(c.File, params)
+	if err != nil {
+		return err
+	}
+	for k := range c.Data {
+		d := c.Data[k]
+		if err := d.Vars(params); err != nil {
+			return err
+		}
+		c.Data[k] = d
+	}
 	return nil
 }
 
@@ -158,29 +289,143 @@ type Data struct {
 	Params    map[string]string `yaml:"params"` // Generator-specific params
 }
 
+func (c *Data) Vars(params map[string]string) error {
+	var err error
+	c.Name, err = Vars(c.Name, params)
+	if err != nil {
+		return err
+	}
+	c.Generator, err = Vars(c.Generator, params)
+	if err != nil {
+		return err
+	}
+	c.Scope, err = Vars(c.Scope, params)
+	if err != nil {
+		return err
+	}
+	c.DataType, err = Vars(c.DataType, params)
+	if err != nil {
+		return err
+	}
+	for k, v := range c.Params {
+		c.Params[k], err = Vars(v, params)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// --------------------------------------------------------------------------
+
 type ClientGroup struct {
-	Clients       uint     `yaml:"clients,omitempty"`
+	Clients       string   `yaml:"clients,omitempty"` // uint
 	Db            string   `yaml:"db,omitempty"`
-	Iter          uint     `yaml:"iter,omitempty"`
-	IterClients   uint32   `yaml:"iter-clients,omitempty"`
-	IterExecGroup uint32   `yaml:"iter-exec-group,omitempty"`
+	Iter          string   `yaml:"iter,omitempty"`            // uint
+	IterClients   string   `yaml:"iter-clients,omitempty"`    // uint
+	IterExecGroup string   `yaml:"iter-exec-group,omitempty"` // uint
 	Name          string   `yaml:"name,omitempty"`
-	QPS           uint     `yaml:"qps,omitempty"`
-	QPSClients    uint     `yaml:"qps-clients,omitempty"`
-	QPSExecGroup  uint     `yaml:"qps-exec-group,omitempty"`
+	QPS           string   `yaml:"qps,omitempty"`            // uint
+	QPSClients    string   `yaml:"qps-clients,omitempty"`    // uint
+	QPSExecGroup  string   `yaml:"qps-exec-group,omitempty"` // uint
 	Runtime       string   `yaml:"runtime,omitempty"`
-	TPS           uint     `yaml:"tps,omitempty"`
-	TPSClients    uint     `yaml:"tps-clients,omitempty"`
-	TPSExecGroup  uint     `yaml:"tps-exec-group,omitempty"`
+	TPS           string   `yaml:"tps,omitempty"`
+	TPSClients    string   `yaml:"tps-clients,omitempty"`
+	TPSExecGroup  string   `yaml:"tps-exec-group,omitempty"`
 	Trx           []string `yaml:"trx,omitempty"`
 }
 
 func (c *ClientGroup) Validate(w []Trx) error {
-	if c.Clients == 0 {
-		c.Clients = 1
+	if err := parseInt(c.Clients); err != nil {
+		return fmt.Errorf("client: '%s' is not an integer: %s", c.Clients, err)
 	}
+	if c.Clients == "" {
+		c.Clients = "1"
+	}
+
+	if err := parseInt(c.Iter); err != nil {
+		return fmt.Errorf("iter: '%s' is not an integer: %s", c.Iter, err)
+	}
+	if err := parseInt(c.IterClients); err != nil {
+		return fmt.Errorf("iter-clients: '%s' is not an integer: %s", c.IterClients, err)
+	}
+	if err := parseInt(c.IterExecGroup); err != nil {
+		return fmt.Errorf("iter-exec-group: '%s' is not an integer: %s", c.IterExecGroup, err)
+	}
+
+	if err := parseInt(c.QPS); err != nil {
+		return fmt.Errorf("iter: '%s' is not an integer: %s", c.QPS, err)
+	}
+	if err := parseInt(c.QPSClients); err != nil {
+		return fmt.Errorf("iter-clients: '%s' is not an integer: %s", c.QPSClients, err)
+	}
+	if err := parseInt(c.QPSExecGroup); err != nil {
+		return fmt.Errorf("iter-exec-group: '%s' is not an integer: %s", c.QPSExecGroup, err)
+	}
+
+	if err := parseInt(c.TPS); err != nil {
+		return fmt.Errorf("tps: '%s' is not an integer: %s", c.TPS, err)
+	}
+	if err := parseInt(c.TPSClients); err != nil {
+		return fmt.Errorf("tps-clients: '%s' is not an integer: %s", c.TPSClients, err)
+	}
+	if err := parseInt(c.TPSExecGroup); err != nil {
+		return fmt.Errorf("tps-exec-group: '%s' is not an integer: %s", c.TPSExecGroup, err)
+	}
+
 	if err := ValidFreq(c.Runtime, "workload.runtime"); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (c *ClientGroup) Vars(params map[string]string) error {
+	var err error
+	c.Db, err = Vars(c.Db, params)
+	if err != nil {
+		return err
+	}
+	c.Clients, err = Vars(c.Clients, params)
+	if err != nil {
+		return err
+	}
+	c.QPS, err = Vars(c.QPS, params)
+	if err != nil {
+		return err
+	}
+	c.QPSClients, err = Vars(c.QPSClients, params)
+	if err != nil {
+		return err
+	}
+	c.QPSExecGroup, err = Vars(c.QPSExecGroup, params)
+	if err != nil {
+		return err
+	}
+	c.TPS, err = Vars(c.TPS, params)
+	if err != nil {
+		return err
+	}
+	c.TPSClients, err = Vars(c.TPSClients, params)
+	if err != nil {
+		return err
+	}
+	c.TPSExecGroup, err = Vars(c.TPSExecGroup, params)
+	if err != nil {
+		return err
+	}
+	c.Runtime, err = Vars(c.Runtime, params)
+	if err != nil {
+		return err
+	}
+	c.Name, err = Vars(c.Name, params)
+	if err != nil {
+		return err
+	}
+	for i := range c.Trx {
+		c.Trx[i], err = Vars(c.Trx[i], params)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -188,6 +433,7 @@ func (c *ClientGroup) Validate(w []Trx) error {
 // --------------------------------------------------------------------------
 
 type MySQL struct {
+	Database       string `yaml:"db,omitempty"`
 	DSN            string `yaml:"dsn,omitempty"`
 	Hostname       string `yaml:"hostname,omitempty"`
 	MyCnf          string `yaml:"mycnf,omitempty"`
@@ -201,50 +447,78 @@ type MySQL struct {
 	DisableAutoTLS *bool `yaml:"disable-auto-tls,omitempty"`
 }
 
-func (c *MySQL) Validate() error {
+func (c *MySQL) With(def MySQL) {
+	if c.Database == "" {
+		c.Database = def.Database
+	}
+	if c.DSN == "" {
+		c.DSN = def.DSN
+	}
+	if c.Hostname == "" {
+		c.Hostname = def.Hostname
+	}
+	if c.MyCnf == "" && def.MyCnf != "" {
+		c.MyCnf = def.MyCnf
+	}
+	if c.Password == "" && def.Password != "" {
+		c.Password = def.Password
+	}
+	if c.PasswordFile == "" && def.PasswordFile != "" {
+		c.PasswordFile = def.PasswordFile
+	}
+	if c.Socket == "" {
+		c.Socket = def.Socket
+	}
+	if c.TimeoutConnect == "" && def.TimeoutConnect != "" {
+		c.TimeoutConnect = def.TimeoutConnect
+	}
+	if c.Username == "" && def.Username != "" {
+		c.Username = def.Username
+	}
+	c.DisableAutoTLS = setBool(c.DisableAutoTLS, def.DisableAutoTLS)
+	c.TLS.With(def.TLS)
+}
+
+func (c *MySQL) Vars(params map[string]string) error {
+	var err error
+	c.Database, err = Vars(c.Database, params)
+	if err != nil {
+		return err
+	}
+	c.DSN, err = Vars(c.DSN, params)
+	if err != nil {
+		return err
+	}
+	c.MyCnf, err = Vars(c.MyCnf, params)
+	if err != nil {
+		return err
+	}
+	c.Username, err = Vars(c.Username, params)
+	if err != nil {
+		return err
+	}
+	c.Password, err = Vars(c.Password, params)
+	if err != nil {
+		return err
+	}
+	c.PasswordFile, err = Vars(c.PasswordFile, params)
+	if err != nil {
+		return err
+	}
+	c.TimeoutConnect, err = Vars(c.TimeoutConnect, params)
+	if err != nil {
+		return err
+	}
+
+	if err := c.TLS.Vars(params); err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func (c *MySQL) ApplyDefaults(d MySQL) {
-	if c.Socket == "" {
-		c.Socket = d.Socket
-	}
-	if c.Hostname == "" {
-		c.Hostname = d.Hostname
-	}
-	if c.MyCnf == "" {
-		c.MyCnf = d.MyCnf
-	}
-	if c.Username == "" {
-		c.Username = d.Username
-	}
-	if c.Password == "" {
-		c.Password = d.Password
-	}
-	if c.PasswordFile == "" {
-		c.PasswordFile = d.Password
-	}
-	if c.TimeoutConnect == "" {
-		c.TimeoutConnect = d.TimeoutConnect
-	}
-
-	if c.TLS.Cert == "" {
-		c.TLS.Cert = d.TLS.Cert
-	}
-	if c.TLS.Key == "" {
-		c.TLS.Key = d.TLS.Key
-	}
-	if c.TLS.CA == "" {
-		c.TLS.CA = d.TLS.CA
-	}
-}
-
-func (c *MySQL) InterpolateEnvVars() {
-	c.MyCnf = interpolateEnv(c.MyCnf)
-	c.Username = interpolateEnv(c.Username)
-	c.Password = interpolateEnv(c.Password)
-	c.PasswordFile = interpolateEnv(c.PasswordFile)
-	c.TimeoutConnect = interpolateEnv(c.TimeoutConnect)
+func (c *MySQL) Validate() error {
+	return nil
 }
 
 func (c MySQL) Redacted() string {
@@ -265,6 +539,23 @@ type TLS struct {
 
 	// ssl-mode from a my.cnf (see dbconn.ParseMyCnf)
 	MySQLMode string `yaml:"-"`
+}
+
+func (c *TLS) With(def TLS) {
+	if c.Cert == "" {
+		c.Cert = def.Cert
+	}
+	if c.Key == "" {
+		c.Key = def.Key
+	}
+	if c.CA == "" {
+		c.CA = def.CA
+	}
+	if c.MySQLMode == "" {
+		c.MySQLMode = def.MySQLMode
+	}
+	c.SkipVerify = setBool(c.SkipVerify, def.SkipVerify)
+	c.Disable = setBool(c.Disable, def.Disable)
 }
 
 func (c *TLS) Validate() error {
@@ -304,10 +595,21 @@ func (c *TLS) Validate() error {
 	return fmt.Errorf("config.tls: invalid combination of files: %+v; valid combinations are: ca; cert and key; ca, cert, and key", c)
 }
 
-func (c *TLS) InterpolateEnvVars() {
-	c.Cert = interpolateEnv(c.Cert)
-	c.Key = interpolateEnv(c.Key)
-	c.CA = interpolateEnv(c.CA)
+func (c *TLS) Vars(params map[string]string) error {
+	var err error
+	c.Cert, err = Vars(c.Cert, params)
+	if err != nil {
+		return err
+	}
+	c.Key, err = Vars(c.Key, params)
+	if err != nil {
+		return err
+	}
+	c.CA, err = Vars(c.CA, params)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // Set return true if TLS is not disabled and at least one file is specified.
@@ -357,61 +659,10 @@ func (c TLS) LoadTLS(server string) (*tls.Config, error) {
 
 // --------------------------------------------------------------------------
 
-const DEFAULT_BIND = ":33075"
-
-type Compute struct {
-	Name string `yaml:"name,omitempty"`
-
-	// Local coordinator
-	Bind                string `yaml:"bind,omitempty"`
-	DisableLocal        *bool  `yaml:"disable-local,omitempty"`
-	DisableFileTransfer *bool  `yaml:"disable-file-transfer,omitempty"`
-	Instances           uint   `yaml:"instances,omitempty"`
-
-	// Remote client
-	Server string `yaml:"server,omitempty"`
-}
-
-func (c *Compute) Validate() error {
-	if c.Name == "" {
-		c.Name, _ = os.Hostname()
-	}
-	if c.Server != "" {
-		// Remote client
-		if c.Bind != "" {
-			return fmt.Errorf("compute.server and compute.bind are mutually exclusive: compute.server enables a remote instance; compute.bind sets the address of a local coordinator")
-		}
-		if True(c.DisableLocal) {
-			return fmt.Errorf("compute.server and compute.disable-local = true are mutually exclusive because it equals zero instances")
-		}
-		if c.Instances > 0 {
-			return fmt.Errorf("compute.server and compute.instances > 0 are mutually exclusive: compute.server enables a remote instance; compute.instances enables a local coordinator")
-		}
-		if !strings.HasPrefix(c.Server, "http") {
-			c.Server = "http://" + c.Server
-		}
-	} else {
-		// Local instance
-		if c.Instances == 0 {
-			c.Instances = 1
-		}
-		/*
-			if c.Instances <= 1 && True(c.DisableLocal) {
-				return fmt.Errorf("compute.instances <= 1 and compute.disable-local = true are mutually exclusive because it equals zero instances")
-			}
-		*/
-		if c.Bind == "" {
-			c.Bind = DEFAULT_BIND
-		}
-	}
-	return nil
-}
-
-// --------------------------------------------------------------------------
-
 type Stats struct {
-	Freq   string                       `yaml:"freq,omitempty"`
-	Report map[string]map[string]string `yaml:"report,omitempty"`
+	Disable *bool                        `yaml:"disable"`
+	Freq    string                       `yaml:"freq,omitempty"`
+	Report  map[string]map[string]string `yaml:"report,omitempty"`
 }
 
 func (c *Stats) Validate() error {
@@ -424,7 +675,7 @@ func (c *Stats) Validate() error {
 	}
 	if len(c.Report) == 0 {
 		c.Report = map[string]map[string]string{
-			"stdout": {}, // defaults in stats/stdout.go
+			"stdout": {"each-instance": "true"},
 		}
 	} else {
 		// Prevent "panic: assignment to entry in nil map", so reporters can trust
@@ -439,6 +690,19 @@ func (c *Stats) Validate() error {
 	return nil
 }
 
-func (c *Stats) InterpolateEnvVars() {
-	c.Freq = interpolateEnv(c.Freq)
+func (c *Stats) Vars(params map[string]string) error {
+	var err error
+	c.Freq, err = Vars(c.Freq, params)
+	if err != nil {
+		return err
+	}
+	for _, r := range c.Report {
+		for k, v := range r {
+			r[k], err = Vars(v, params)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

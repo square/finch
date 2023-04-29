@@ -17,8 +17,8 @@ func TestXid_TrxScope(t *testing.T) {
 			DataKey: "@d",
 		}))
 
-	r := finch.ExecCount{}
-	r[finch.TRX] = 1
+	r := data.ExecCount{}
+	r[data.TRX] = 1
 
 	v1 := g.Values(r)
 	v2 := g.Values(r)
@@ -32,7 +32,7 @@ func TestXid_TrxScope(t *testing.T) {
 	}
 
 	// Next trx should cause new value
-	r[finch.TRX] += 1
+	r[data.TRX] += 1
 	v3 := g.Values(r)
 	v4 := g.Values(r)
 

@@ -29,6 +29,6 @@ func (g *Xid) Copy(r finch.RunLevel) Generator {
 	return NewXid(g.id.Copy(r))
 }
 
-func (g *Xid) Values(c finch.ExecCount) []interface{} {
+func (g *Xid) Values(c ExecCount) []interface{} {
 	return []interface{}{xid.New().String()}
 }

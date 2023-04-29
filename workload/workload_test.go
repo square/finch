@@ -15,7 +15,10 @@ import (
 	"github.com/square/finch/workload"
 )
 
+var p = map[string]string{}
+
 func TestGroups_SetupOne(t *testing.T) {
+	// Just one SELECT statement in this trx file
 	trxList := []config.Trx{
 		{
 			Name: "001.sql", // must set; Validate not called
@@ -28,16 +31,21 @@ func TestGroups_SetupOne(t *testing.T) {
 		},
 	}
 	scope := data.NewScope()
-	set, err := trx.Load(trxList, scope)
+	set, err := trx.Load(trxList, scope, p)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	// ----------------------------------------------------------------------
+	// Exec group
+	//
+	// With no work load, all trx should be auto-assigned to 1 exec/client group
+	// with clients: 1 and name dml1 (because there's no DDL)
 	a := workload.Allocator{
-		Stage:    "setup",
-		TrxSet:   set,
-		Workload: []config.ClientGroup{},
-		DoneChan: make(chan *client.Client, 1),
+		Stage:     1,
+		StageName: "setup",
+		TrxSet:    set,
+		Workload:  []config.ClientGroup{}, // NO WORKLOAD
 	}
 
 	gotGroups, err := a.Groups()
@@ -55,9 +63,9 @@ func TestGroups_SetupOne(t *testing.T) {
 
 	eg := []config.ClientGroup{
 		{
-			Name:    "auto1",
-			Clients: 1,
-			Iter:    1,
+			Name:    "dml1",
+			Clients: "1",
+			Iter:    "",
 			Trx:     []string{"001.sql"},
 		},
 	}
@@ -66,22 +74,12 @@ func TestGroups_SetupOne(t *testing.T) {
 		t.Logf("got: %#v", a.Workload)
 	}
 
-	a = workload.Allocator{
-		Stage:    "setup",
-		TrxSet:   set,
-		Workload: []config.ClientGroup{},
-	}
-	gotGroups, err = a.Groups()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if diff := deep.Equal(gotGroups, execptGroups); diff != nil {
-		t.Error(diff)
-		t.Logf("got: %#v", gotGroups)
-	}
-
+	// ----------------------------------------------------------------------
 	// Clients
-	gotClients, err := a.Clients(gotGroups)
+	//
+	// Given the exec groups from the previous test ^, allocate the Clients.
+	// There should only be 1.
+	gotClients, err := a.Clients(gotGroups, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,9 +87,10 @@ func TestGroups_SetupOne(t *testing.T) {
 		t.Fatalf("expected 1 client, got %#v", gotClients)
 	}
 	r := finch.RunLevel{
-		Stage:         "setup",
+		Stage:         1,
+		StageName:     "setup",
 		ExecGroup:     1,
-		ExecGroupName: "auto1",
+		ExecGroupName: "dml1",
 		ClientGroup:   1,
 		Client:        1,
 	}
@@ -103,7 +102,7 @@ func TestGroups_SetupOne(t *testing.T) {
 				Clients: []*client.Client{
 					{ // client 0
 						RunLevel: r,
-						Iter:     1,
+						Iter:     0,
 						Statements: []*trx.Statement{
 							{
 								Trx:       "001.sql",
@@ -112,9 +111,9 @@ func TestGroups_SetupOne(t *testing.T) {
 								Inputs:    []string{"@id"},
 							},
 						},
-						Data: []trx.Data{
+						Data: []client.StatementData{
 							{
-								TrxBoundary: finch.TRX_BEGIN | finch.TRX_END,
+								TrxBoundary: trx.BEGIN | trx.END,
 							},
 						},
 					},
@@ -137,9 +136,10 @@ func TestGroups_SetupOne(t *testing.T) {
 	}
 
 	r = finch.RunLevel{
-		Stage:         "setup",
+		Stage:         1,
+		StageName:     "setup",
 		ExecGroup:     1,
-		ExecGroupName: "auto1",
+		ExecGroupName: "dml1",
 		ClientGroup:   1,
 		Client:        1,
 		Trx:           1,
@@ -180,17 +180,18 @@ func TestGroups_PartialAlloc(t *testing.T) {
 		},
 	}
 	scope := data.NewScope()
-	set, err := trx.Load(trxList, scope)
+	set, err := trx.Load(trxList, scope, p)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	a := workload.Allocator{
-		Stage:  "setup",
-		TrxSet: set,
+		Stage:     1,
+		StageName: "setup",
+		TrxSet:    set,
 		Workload: []config.ClientGroup{
 			{
-				Clients: 1,
+				Clients: "1",
 				// Trx: []string not set, so this exec group gets all trx
 			},
 		},
@@ -209,8 +210,8 @@ func TestGroups_PartialAlloc(t *testing.T) {
 
 	eg := []config.ClientGroup{
 		{
-			Name:    "auto1",
-			Clients: 1,
+			Name:    "dml1",
+			Clients: "1",
 			Trx:     []string{"001.sql"}, // auto-assigned
 		},
 	}

@@ -14,6 +14,7 @@ import (
 	myerr "github.com/go-mysql/errors"
 
 	"github.com/square/finch"
+	"github.com/square/finch/data"
 	"github.com/square/finch/stats"
 	"github.com/square/finch/trx"
 )
@@ -23,10 +24,10 @@ type Client struct {
 	ExecGroup        uint
 	RunLevel         finch.RunLevel
 	Statements       []*trx.Statement
-	Data             []trx.Data
+	Data             []StatementData
 	Stats            []*stats.Trx `deep:"-"`
-	TrxBoundary      []byte       `deep:"-"`
 	DB               *sql.DB      `deep:"-"`
+	DefaultDb        string
 	IterExecGroup    uint32
 	IterExecGroupPtr *uint32
 	IterClients      uint32
@@ -40,6 +41,13 @@ type Client struct {
 	ps     []*sql.Stmt
 	values [][]interface{}
 	conn   *sql.Conn
+}
+
+type StatementData struct {
+	Inputs      []data.Generator `deep:"-"` // input to query
+	Outputs     []interface{}    `deep:"-"` // output from query; values are data.Generator
+	InsertId    data.Generator   `deep:"-"`
+	TrxBoundary byte
 }
 
 func (c *Client) Init() error {
@@ -70,17 +78,28 @@ func (c *Client) Connect(ctx context.Context, cerr error, query string) bool {
 		if ctx.Err() != nil {
 			return false
 		}
+
 		var err error
 		c.conn, err = c.DB.Conn(ctx)
-		if err == nil {
-			err = c.conn.PingContext(ctx)
-			if err == nil {
-				if cerr != nil {
-					log.Printf("Client %s reconnected in %s", c.RunLevel.ClientId(), time.Now().Sub(t0))
-				}
-				return true // success; keep running
-			}
+		if err != nil {
+			goto RETRY
 		}
+
+		if c.DefaultDb != "" {
+			_, err = c.conn.ExecContext(ctx, "USE `"+c.DefaultDb+"`")
+		} else {
+			err = c.conn.PingContext(ctx)
+		}
+		if err != nil {
+			goto RETRY
+		}
+
+		if cerr != nil {
+			log.Printf("Client %s reconnected in %s", c.RunLevel.ClientId(), time.Now().Sub(t0))
+		}
+		return true // success; keep running
+
+	RETRY:
 		if i%10 == 0 {
 			log.Printf("Client %s error reconnecting: %s (retrying)", c.RunLevel.ClientId(), err)
 		}
@@ -156,10 +175,10 @@ func (c *Client) Run(ctxExec context.Context) {
 	var res sql.Result
 	var t time.Time
 
-	cnt := finch.ExecCount{}
-	cnt[finch.STAGE] = finch.StageNumber[c.RunLevel.Stage]
-	cnt[finch.EXEC_GROUP] = c.RunLevel.ExecGroup
-	cnt[finch.CLIENT_GROUP] = c.RunLevel.ClientGroup
+	cnt := data.ExecCount{}
+	cnt[data.STAGE] = c.RunLevel.Stage
+	cnt[data.EXEC_GROUP] = c.RunLevel.ExecGroup
+	cnt[data.CLIENT_GROUP] = c.RunLevel.ClientGroup
 
 	// trxNo indexes into c.Stats and resets to 0 on each iteration. Remember:
 	// these are finch trx (files), not MySQL trx, so trx boundaries mark the
@@ -178,10 +197,10 @@ ITER:
 		if c.IterClients > 0 && atomic.AddUint32(c.IterClientsPtr, 1) > c.IterClients {
 			return
 		}
-		if c.Iter > 0 && cnt[finch.ITER] == c.Iter {
+		if c.Iter > 0 && cnt[data.ITER] == c.Iter {
 			return
 		}
-		cnt[finch.ITER] += 1
+		cnt[data.ITER] += 1
 		trxNo = -1
 
 		for i := range c.Statements {
@@ -191,13 +210,11 @@ ITER:
 				continue
 			}
 
-			cnt[finch.QUERY] += 1
-
 			// Is this query the start of a new (finch) trx file? This is not
 			// a MySQL trx (either BEGIN or implicit). It marks finch trx scope
 			// "trx" is a trx file in the config assigned to this client.
-			if c.Data[i].TrxBoundary&finch.TRX_BEGIN == 1 {
-				cnt[finch.TRX] += 1
+			if c.Data[i].TrxBoundary&trx.BEGIN == 1 {
+				cnt[data.TRX] += 1
 				trxNo += 1
 			}
 

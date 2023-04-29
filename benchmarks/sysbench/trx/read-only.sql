@@ -2,7 +2,7 @@
 BEGIN
 
 -- prepare
--- copy: 10
+-- copies: 10
 SELECT c FROM sbtest1 WHERE id=@id
 
 -- prepare

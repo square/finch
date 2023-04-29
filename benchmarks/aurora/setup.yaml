@@ -1,0 +1,6 @@
+
+setup:
+  trx:
+    - file: trx/create-table.sql
+    - file: trx/insert-rows.sql
+    - file: trx/analzye-table.sql

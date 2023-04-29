@@ -8,6 +8,22 @@ import (
 	"github.com/square/finch"
 )
 
+// ExecCount is an array of counters for each scope const below. Each Client
+// increments the counts as it executes. ScopedGenerator uses the counts to
+// determine when to call again the Generator that it wraps for new values in
+// the new scope.
+type ExecCount [5]uint
+
+// These const index ExecCount.
+const (
+	STAGE byte = iota
+	EXEC_GROUP
+	CLIENT_GROUP
+	ITER
+	TRX
+	//QUERY is not counted because every call to Values implies query += 1
+)
+
 // Key represents one data key (@d).
 type Key struct {
 	Name      string
@@ -121,15 +137,16 @@ func (g *ScopedGenerator) Copy(r finch.RunLevel) Generator {
 	return NewScopedGenerator(g.g.Copy(r))
 }
 
-func (g *ScopedGenerator) Values(c finch.ExecCount) []interface{} {
+func (g *ScopedGenerator) Values(cnt ExecCount) []interface{} {
 	switch g.s {
+	// @todo implement other scopes
 	case finch.SCOPE_TRX:
-		if c[finch.TRX] > g.trxNo { // new trx
-			g.trxNo = c[finch.TRX]
-			g.vals = g.g.Values(c)
+		if cnt[TRX] > g.trxNo { // new trx
+			g.trxNo = cnt[TRX]
+			g.vals = g.g.Values(cnt)
 		}
-	default:
-		g.vals = g.g.Values(c)
+	default: // QUERY
+		g.vals = g.g.Values(cnt)
 	}
 	return g.vals
 }

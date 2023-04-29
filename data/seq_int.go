@@ -61,7 +61,7 @@ func (g *IntSequence) Copy(r finch.RunLevel) Generator {
 	return c
 }
 
-func (g *IntSequence) Values(_ finch.ExecCount) []interface{} {
+func (g *IntSequence) Values(_ ExecCount) []interface{} {
 	g.Lock()
 	lower := g.n
 	upper := g.n + g.size
@@ -99,7 +99,7 @@ func (g *IncUint64) Format() string { return "%d" }
 
 func (g *IncUint64) Copy(r finch.RunLevel) Generator { return NewIncUint64(g.id.Copy(r), nil) }
 
-func (g *IncUint64) Values(_ finch.ExecCount) []interface{} {
+func (g *IncUint64) Values(_ ExecCount) []interface{} {
 	return []interface{}{atomic.AddUint64(&g.i, 1)}
 }
 

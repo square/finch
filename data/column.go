@@ -57,7 +57,7 @@ func (g *Column) Copy(r finch.RunLevel) Generator {
 	return NewColumn(g.id.Copy(r), g.params)
 }
 
-func (g *Column) Values(_ finch.ExecCount) []interface{} {
+func (g *Column) Values(_ ExecCount) []interface{} {
 	if g.insertId {
 		return []interface{}{g.rId}
 	}
@@ -119,7 +119,7 @@ func (g noop) Copy(r finch.RunLevel) Generator {
 	return g
 }
 
-func (g noop) Values(_ finch.ExecCount) []interface{} {
+func (g noop) Values(_ ExecCount) []interface{} {
 	return nil
 }
 

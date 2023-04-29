@@ -1,0 +1,23 @@
+
+stage:
+  name: "setup"
+  stats:
+    disable: true
+  trx:
+    # Executed in order:
+    - file: trx/schema.sql
+    - file: trx/insert-rows.sql
+      data:
+        k:
+          generator: "rand-int"
+          params:
+            max: 65536
+        c:
+          generator: "str-not-null"
+          params:
+            len: 119 # not a typo
+        pad:
+          generator: "str-not-null"
+          params:
+            len: 59 # not a typo
+    - file: trx/secondary-index.sql

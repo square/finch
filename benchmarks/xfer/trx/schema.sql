@@ -1,3 +1,7 @@
+CREATE DATABASE IF NOT EXISTS finch;
+
+USE finch;
+
 DROP TABLE IF EXISTS customers;
 
 DROP TABLE IF EXISTS balances;

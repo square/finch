@@ -5,37 +5,130 @@ package config
 import (
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
+	human "github.com/dustin/go-humanize"
 	"gopkg.in/yaml.v2"
+
+	"github.com/square/finch"
 )
 
-func Load(filePath string) (File, error) {
+// stageFile represents the stage file layout:
+//
+//	stage:
+//	  name: read-only
+//	  runtime: 60s
+//	  workload:
+//	    - clients: 1
+//
+// This is purely "decorative" because I like the explicit "stage" at top
+// because it makes it clear that what follows is a stage config.
+type stageFile struct {
+	Stage Stage `yaml:"stage"`
+}
+
+func Load(files []string, kvparams []string) ([]Stage, error) {
+	var err error
+	base := map[string]*Base{}
+	stages := []Stage{}
+
+	// Get and restore current working dir because we chdir to validate stage files
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	finch.Debug("cwd %s", cwd)
+	defer func() {
+		os.Chdir(cwd)
+	}()
+
+	params := map[string]string{}
+	for _, kv := range kvparams {
+		f := strings.SplitN(kv, "=", 2)
+		if len(f) != 2 {
+			log.Printf("Ignoring invalid --param %s: split into %d fields, expected 2\n", kv, len(f))
+			continue
+		}
+		params[f[0]] = f[1]
+	}
+
+	for n, fileName := range files {
+		// Load base file (_all.yaml) once for the dir, if it exists
+		dir := filepath.Dir(fileName)
+		b, ok := base[dir]
+		if !ok {
+			baseFile := filepath.Join(dir, "_all.yaml")
+			if FileExists(baseFile) {
+				finch.Debug("base: %s", baseFile)
+				bytes, err := read(baseFile)
+				if err != nil {
+					return nil, err
+				} else {
+					var newb Base
+					if err := yaml.UnmarshalStrict(bytes, &newb); err != nil {
+						return nil, fmt.Errorf("cannot decode YAML in %s: %s", fileName, err)
+					}
+					base[dir] = &newb
+					b = &newb
+					finch.Debug("base: %+v", *b)
+				}
+			} else {
+				base[dir] = nil
+				finch.Debug("base: none in %s", dir)
+			}
+		}
+
+		// Load stage file, which includes and overwrite the optional base config (b)
+		bytes, err := read(fileName)
+		if err != nil {
+			return nil, err
+		}
+		f := &stageFile{Stage: NewStage(fileName, n+1, b)} // Stage from Base (b)
+		if err := yaml.UnmarshalStrict(bytes, f); err != nil {
+			return nil, fmt.Errorf("cannot decode YAML in %s: %s", fileName, err)
+		}
+
+		// --param foo=bar on command line overrides .params in config files
+		for k, v := range params {
+			f.Stage.Params[k] = v
+		}
+
+		// interpolate $vars -> values (see Vars func below)
+		if err := f.Stage.Vars(); err != nil {
+			return nil, fmt.Errorf("in %s: %s", fileName, err)
+		}
+
+		// Chdir to confit file so relative trx file paths in the config work,
+		// e.g. "trx.file: trx/foo.sql" where trx/ is relative to the dir where
+		// the config file is located.
+		os.Chdir(filepath.Dir(fileName))
+
+		// Validate config now that it's final (interpolated vars and chdir)
+		if err := f.Stage.Validate(); err != nil {
+			return nil, fmt.Errorf("%s invalid: %s", fileName, err)
+		}
+		stages = append(stages, f.Stage)
+		finch.Debug("%+v", f.Stage)
+	}
+	return stages, nil
+}
+
+func read(filePath string) ([]byte, error) {
+	finch.Debug("read %s", filePath)
 	file, err := filepath.Abs(filePath)
 	if err != nil {
-		return File{}, err
+		return nil, err
 	}
-
 	if _, err := os.Stat(file); err != nil {
-		return File{}, fmt.Errorf("config file %s does not exist", filePath)
+		return nil, err
 	}
-
-	bytes, err := ioutil.ReadFile(file)
-	if err != nil {
-		// err includes file name, e.g. "read config file: open <file>: no such file or directory"
-		return File{}, fmt.Errorf("cannot read config file: %s", err)
-	}
-
-	var cfg File
-	if err := yaml.UnmarshalStrict(bytes, &cfg); err != nil {
-		return cfg, fmt.Errorf("cannot decode YAML in %s: %s", file, err)
-	}
-
-	return cfg, nil
+	return ioutil.ReadFile(file)
 }
 
 // ValidFreq validates the freq value for the given config section and returns
@@ -79,24 +172,79 @@ func FileExists(filePath string) bool {
 	return err == nil
 }
 
-var envvar = regexp.MustCompile(`\${([\w_.-]+)(?:(\:\-)([\w_.-]*))?}`)
+var varRE = []*regexp.Regexp{
+	regexp.MustCompile(`\${([^}]+)}`),  // ${param.foo} for "hello${param.foo}bar"
+	regexp.MustCompile(`\$([^\s"']+)`), // $param.foo for standalone value
+}
+var reHumanNumber = regexp.MustCompile(`([\d,]*\d+(?i:[MKGBI]*))`) // 1M or 1,000,000 -> 1000000
+var reAllDigits = regexp.MustCompile(`^\d+$`)
 
-// interpolateEnv changes ${FOO} to the value of environment variable FOO.
-// It also changes ${FOO:-bar} to "bar" if env var FOO is an empty string.
-// Only strict matching, else the original string is returned.
-func interpolateEnv(v string) string {
-	if !strings.Contains(v, "${") {
-		return v
+// Vars changes $params.foo and $FOO to param values and environment variable
+// values, respectively, and human numbers to integers (1k -> 1000).
+// "${var}" is also valid but YAML requires string quotes around {}.
+func Vars(s string, params map[string]string) (string, error) {
+	for _, r := range varRE {
+		m := r.FindAllStringSubmatch(s, -1)
+		if len(m) == 0 {
+			continue
+		}
+		rep := make([]string, 0, len(m)*2)
+		for i := range m {
+			v := m[i]
+			//p := strings.Trim(v[1], "{}")
+			p := v[1]
+			switch {
+			case strings.HasPrefix(p, "params."):
+				k := strings.TrimPrefix(p, "params.")
+				val, ok := params[k]
+				if !ok {
+					return "", fmt.Errorf("%s not defined (is it spelled correctly?)", p)
+				}
+				rep = append(rep, v[0], val)
+			case strings.HasPrefix(p, "sys."):
+				k := strings.TrimPrefix(p, "sys.")
+				val, ok := finch.SystemParams[k]
+				if !ok {
+					return "", fmt.Errorf("%s not defined (is it spelled correctly?)", p)
+				}
+				rep = append(rep, v[0], val)
+			default:
+				val, ok := os.LookupEnv(p)
+				if !ok {
+					return "", fmt.Errorf("environment variable %s not set (is it spelled correctly?)", p)
+				}
+				rep = append(rep, v[0], val)
+			}
+		}
+		finch.Debug("var: %s -> %v", s, rep)
+		r := strings.NewReplacer(rep...)
+		s = r.Replace(s)
 	}
-	m := envvar.FindStringSubmatch(v)
-	if len(m) != 4 {
-		return v // strict match only
+
+	// Look for human numbers like 1k and 1,000
+	m := reHumanNumber.FindAllStringSubmatch(s, -1)
+	if len(m) == 0 {
+		return s, nil // no human numbers
 	}
-	v2 := os.Getenv(m[1])
-	if v2 == "" && m[2] != "" {
-		return m[3]
+	rep := []string{}
+	for i := range m {
+		// To keep the regex simple, reHumanNumber also matches ints like 1000,
+		// but don't waste time parsing something that's already machine number.
+		if reAllDigits.MatchString(m[i][0]) {
+			continue
+		}
+		d, err := human.ParseBytes(m[i][1])
+		if err != nil {
+			return "", fmt.Errorf("invalid human-readable number: %s: %s", m[i][1], err)
+		}
+		rep = append(rep, m[i][0], strconv.FormatUint(d, 10))
 	}
-	return envvar.ReplaceAllLiteralString(v, v2)
+	if len(rep) == 0 { // all machine numbers (see comment above)
+		return s, nil
+	}
+	finch.Debug("var: %s -> %v", s, rep)
+	r := strings.NewReplacer(rep...)
+	return r.Replace(s), nil
 }
 
 // setBool sets c to the value of b if c is nil (not set). Pointers are required
@@ -109,4 +257,12 @@ func setBool(c *bool, b *bool) *bool {
 		*c = *b
 	}
 	return c
+}
+
+func parseInt(s string) error {
+	if s == "" {
+		return nil
+	}
+	_, err := strconv.ParseUint(s, 10, 32)
+	return err
 }

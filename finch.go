@@ -8,54 +8,26 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
 
-const VERSION = "1.0.0"
-
 const (
-	STAGE_SETUP     = "setup"
-	STAGE_WARMUP    = "warmup"
-	STAGE_BENCHMARK = "benchmark"
-	STAGE_CLEANUP   = "cleanup"
+	VERSION = "1.0.0"
+
+	DEFAULT_SERVER_PORT = "33075"
+
+	COPY_NUMBER = `/*!copy-number*/`
+
+	NOOP_COLUMN = "_"
 )
 
-// Execution is sequenced by execution group: sequential or concurrent.
-// All clients in an execution group execute together, concurrently.
-// Client groups vary the number of clients and trx those clients execute (within an exec group).
-
-// exec group 1
-// └──client group 1  [trx1, trx2]
-//    └── client 1
-//    └── client 2
-//    └── cilent 3
-//    └── client 4
-// exec group 2
-// └──client group 2  [trx2]
-// |  └── client 1
-// |  └── client 2
-// └──client group 2  [trx3]
-//    └── client 1
-//    └── client 2
-
-// sequence is an ordered set of trx
-//   by workload (setup)
-//   by clients (client gorups)
-//   all clients, all workloads
-
-// global
-// └──stage*              (might repeat: iter 2, so workload scope needed)
-//    └──workload
-//       └──exec group
-//          └──client group
-//             └──client*
-//                └──trx         } trx set
-//                   └──statment }
-
 type RunLevel struct {
-	Stage         string
+	Stage         uint
+	StageName     string
 	ExecGroup     uint
 	ExecGroupName string
 	ClientGroup   uint
@@ -67,37 +39,14 @@ type RunLevel struct {
 }
 
 func (s RunLevel) String() string {
-	return fmt.Sprintf("%s/e%d(%s)/g%d/c%d/t%d(%s)/q%d",
-		s.Stage, s.ExecGroup, s.ExecGroupName, s.ClientGroup, s.Client, s.Trx, s.TrxName, s.Query)
+	return fmt.Sprintf("%d(%s)/e%d(%s)/g%d/c%d/t%d(%s)/q%d",
+		s.Stage, s.StageName, s.ExecGroup, s.ExecGroupName, s.ClientGroup, s.Client, s.Trx, s.TrxName, s.Query)
 }
 
 func (s RunLevel) ClientId() string {
-	return fmt.Sprintf("%s/e%d(%s)/g%d/c%d",
-		s.Stage, s.ExecGroup, s.ExecGroupName, s.ClientGroup, s.Client)
+	return fmt.Sprintf("%d(%s)/e%d(%s)/g%d/c%d",
+		s.Stage, s.StageName, s.ExecGroup, s.ExecGroupName, s.ClientGroup, s.Client)
 }
-
-type ExecCount [6]uint
-
-const (
-	STAGE byte = iota
-	EXEC_GROUP
-	CLIENT_GROUP
-	ITER
-	TRX
-	QUERY
-)
-
-const NOOP_COLUMN = "_"
-
-const (
-	EXEC_SEQUENTIAL = "sequential"
-	EXEC_CONCURRENT = "concurrent"
-)
-const (
-	TRX_STMT  = byte(0x0)
-	TRX_BEGIN = byte(0x1)
-	TRX_END   = byte(0x2)
-)
 
 const (
 	SCOPE_GLOBAL       = "global"
@@ -109,13 +58,6 @@ const (
 	SCOPE_TRX          = "trx"
 	SCOPE_STATEMENT    = "statement"
 )
-
-var StageNumber = map[string]uint{
-	"setup":     1,
-	"warmup":    2,
-	"benchmark": 3,
-	"cleanup":   4,
-}
 
 var (
 	Debugging = false
@@ -149,4 +91,27 @@ func BoolString(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+var portRe = regexp.MustCompile(`:\d+$`)
+
+func WithPort(s, p string) string {
+	if portRe.MatchString(s) {
+		return s
+	}
+	return s + ":" + p
+}
+
+func Uint(s string) uint {
+	if s == "" {
+		return 0
+	}
+	i, _ := strconv.ParseUint(s, 10, 64)
+	return uint(i)
+}
+
+var SystemParams = map[string]string{}
+
+func init() {
+	SystemParams["CPU_CORES"] = strconv.Itoa(runtime.NumCPU())
 }

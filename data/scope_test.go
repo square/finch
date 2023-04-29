@@ -15,7 +15,8 @@ func TestScope_Trx(t *testing.T) {
 	g := data.NewIncUint64(data.Id{Type: "inc-uint64", DataKey: keyName, Scope: finch.SCOPE_TRX}, nil)
 
 	r := finch.RunLevel{
-		Stage:         "benchmark",
+		Stage:         1,
+		StageName:     "benchmark",
 		ExecGroup:     1,
 		ExecGroupName: "test-execgrp",
 		ClientGroup:   1,

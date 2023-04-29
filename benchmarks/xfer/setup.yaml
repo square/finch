@@ -1,0 +1,66 @@
+stage:
+  name: setup
+  stats:
+    disable: true
+  workload:
+    - clients: 1                  #
+      name: schema                # exec group "schema"
+      trx: [schema.sql]           #
+    - clients: 2                    #
+      name: rows                    #
+      trx: [insert-cust-bal.sql]    # exec group "rows"
+      db: finch                     #
+    - clients: 2                    #
+      name: rows                    #
+      trx: [insert-xfers.sql]       #
+      db: finch
+
+  trx:
+    - file: ./trx/schema.sql
+    - file: ./trx/insert-cust-bal.sql
+      data:
+        c_token:
+          generator: xid
+          scope: trx # required because c_token is used 4 times per trx
+        b_token:
+          generator: xid
+        c_c1:
+          generator: "str-not-null"
+          params:
+            len: 20
+        c_c2:
+          generator: "str-not-null"
+          params:
+            len: 50
+        c_c3:
+          generator: "str-not-null"
+          params:
+            len: 75
+        b_c1:
+          generator: "str-not-null"
+          params:
+            len: 30
+        b_c2:
+          generator: "str-not-null"
+          params:
+            len: 50
+    - file: ./trx/insert-xfers.sql
+      data:
+        x_token:
+          generator: "xid"
+        s_token:
+          generator: "xid"
+        r_token:
+          generator: "xid"
+        c1:
+          generator: "str-not-null"
+          params:
+            len: 10
+        c2:
+          generator: "str-not-null"
+          params:
+            len: 50
+        c3:
+          generator: "str-not-null"
+          params:
+            len: 5

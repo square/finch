@@ -1,0 +1,33 @@
+
+- runtime: 60s
+  workload:
+    - clients: 1
+      iter: 4
+  trx:
+    - file: write-only.sql
+      data:
+        id:
+          generator: "rand-int"
+          params:
+            min: 1
+            max: 1000000
+            dist: normal
+        del_id:
+          generator: "rand-int"
+          scope: trx
+          params:
+            min: 1
+            max: 1000000
+            dist: normal
+        k:
+          generator: "rand-int"
+          params:
+            max: 65536
+        c:
+          generator: "str-not-null"
+          params:
+            len: 119
+        pad:
+          generator: "str-not-null"
+          params:
+            len: 59

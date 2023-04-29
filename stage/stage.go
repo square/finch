@@ -21,18 +21,18 @@ import (
 // Stage runs the workload, controlling the order (by subset, if any).
 type Stage struct {
 	cfg   config.Stage
-	scope *data.Scope
+	gds   *data.Scope
 	stats *stats.Collector
 	// --
 	doneChan   chan *client.Client      // <-Client.Run()
 	execGroups [][]workload.ClientGroup // [n][Client]
 }
 
-func New(cfg config.Stage, s *data.Scope, c *stats.Collector) *Stage {
+func New(cfg config.Stage, gds *data.Scope, stats *stats.Collector) *Stage {
 	return &Stage{
 		cfg:   cfg,
-		scope: s,
-		stats: c,
+		gds:   gds,
+		stats: stats,
 		// --
 		doneChan: make(chan *client.Client, 1),
 	}
@@ -48,7 +48,7 @@ func (s *Stage) Prepare() error {
 	// data generators, too. Being valid means only that the Finch config/setup is
 	// valid, not the SQL statements because those aren't run yet, so MySQL might
 	// still return errors on Run.
-	trxSet, err := trx.Load(s.cfg.Trx, s.scope)
+	trxSet, err := trx.Load(s.cfg.Trx, s.gds, s.cfg.Params)
 	if err != nil {
 		return err
 	}
@@ -59,18 +59,19 @@ func (s *Stage) Prepare() error {
 	// for each exec group. Both steps are required but separated for testing because
 	// the second is complex.
 	a := workload.Allocator{
-		Stage:    s.cfg.Name,
-		TrxSet:   trxSet,
-		Workload: s.cfg.Workload,
-		StageQPS: limit.NewRate(s.cfg.QPS), // nil if config.stage.qps == 0
-		StageTPS: limit.NewRate(s.cfg.TPS), // nil if config.stage.tps == 0
-		DoneChan: s.doneChan,
+		Stage:     s.cfg.N,
+		StageName: s.cfg.Name,
+		TrxSet:    trxSet,
+		Workload:  s.cfg.Workload,
+		StageQPS:  limit.NewRate(finch.Uint(s.cfg.QPS)), // nil if config.stage.qps == 0
+		StageTPS:  limit.NewRate(finch.Uint(s.cfg.TPS)), // nil if config.stage.tps == 0
+		DoneChan:  s.doneChan,
 	}
 	groups, err := a.Groups()
 	if err != nil {
 		return err
 	}
-	s.execGroups, err = a.Clients(groups)
+	s.execGroups, err = a.Clients(groups, s.stats != nil)
 	if err != nil {
 		return err
 	}

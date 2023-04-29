@@ -1,0 +1,5 @@
+
+# Apply to all stages
+params:
+  tables: 250
+  rows: 25000

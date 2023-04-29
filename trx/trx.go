@@ -20,10 +20,17 @@ import (
 	"github.com/square/finch/limit"
 )
 
+const (
+	STMT  = byte(0x0)
+	BEGIN = byte(0x1)
+	END   = byte(0x2)
+)
+
 // Set is the complete set of transactions (and statments) for a stage.
 type Set struct {
 	Order      []string                // trx names in config order
 	Statements map[string][]*Statement // keyed on trx name
+	Meta       map[string]Meta
 	Data       *data.Scope
 }
 
@@ -44,25 +51,21 @@ type Statement struct {
 	Limit        limit.Data
 }
 
-// Data is various I/O, controls, and flags that are scoped and copied for each statement.
-type Data struct {
-	Inputs      []data.Generator `deep:"-"` // input to query
-	Outputs     []interface{}    `deep:"-"` // output from query; values are data.Generator
-	InsertId    data.Generator   `deep:"-"`
-	TrxBoundary byte
+type Meta struct {
+	DDL bool
 }
 
-func Load(trxList []config.Trx, scope *data.Scope) (*Set, error) {
+func Load(trxList []config.Trx, scope *data.Scope, params map[string]string) (*Set, error) {
 	set := &Set{
 		Order:      make([]string, 0, len(trxList)),
 		Statements: map[string][]*Statement{},
 		Data:       scope,
+		Meta:       map[string]Meta{},
 	}
 	for i := range trxList {
-		if err := NewFile(trxList[i], set).Load(); err != nil {
+		if err := NewFile(trxList[i], set, params).Load(); err != nil {
 			return nil, err
 		}
-		//finch.Debug("%d statements in trx %s", len(trx.Statements), w[i].Name)
 	}
 	return set, nil
 }
@@ -79,17 +82,20 @@ type lineBuf struct {
 type File struct {
 	lb      lineBuf
 	set     *Set
+	params  map[string]string
 	cfg     config.Trx
 	colRefs map[string]int
 	dg      map[string]data.Generator
 	stmtNo  uint // 1-indexed in file (not a line number; not an index into stmt)
 	stmt    []*Statement
+	hasDDL  bool
 }
 
-func NewFile(cfg config.Trx, set *Set) *File {
+func NewFile(cfg config.Trx, set *Set, params map[string]string) *File {
 	return &File{
 		cfg:     cfg,
 		set:     set,
+		params:  params,
 		colRefs: map[string]int{},
 		dg:      map[string]data.Generator{},
 		lb:      lineBuf{mods: []string{}},
@@ -142,6 +148,9 @@ func (f *File) Load() error {
 
 	f.set.Order = append(f.set.Order, f.cfg.Name)
 	f.set.Statements[f.cfg.Name] = f.stmt
+	f.set.Meta[f.cfg.Name] = Meta{
+		DDL: f.hasDDL,
+	}
 
 	return nil
 }
@@ -156,7 +165,11 @@ func (f *File) line(line string) error {
 			if line == "-- EOF" {
 				return ErrEOF
 			}
-			f.lb.mods = append(f.lb.mods, strings.TrimSpace(strings.TrimPrefix(line, "--")))
+			mod, err := config.Vars(strings.TrimSpace(strings.TrimPrefix(line, "--")), f.params)
+			if err != nil {
+				return fmt.Errorf("parsing modifier '%s' on line %d: %s", line, f.lb.n, err)
+			}
+			f.lb.mods = append(f.lb.mods, mod)
 		} else {
 			f.lb.str += line + " "
 		}
@@ -215,6 +228,9 @@ func (f *File) statement() ([]*Statement, error) {
 		s.Commit = true // used to measure TPS rate in client/client.go
 	case "INSERT", "UPDATE", "DELETE", "REPLACE":
 		s.Write = true
+	case "ALTER", "CREATE", "DROP", "RENAME", "TRUNCATE":
+		finch.Debug("DDL")
+		f.hasDDL = true
 	}
 
 	// ----------------------------------------------------------------------
@@ -308,7 +324,7 @@ func (f *File) statement() ([]*Statement, error) {
 				if strings.HasPrefix(mod, "copies") {
 					continue
 				}
-				if strings.HasPrefix(mod, "prepare") && !strings.Contains(query, "%{COPY_NUMBER}") {
+				if strings.HasPrefix(mod, "prepare") && !strings.Contains(query, finch.COPY_NUMBER) {
 					prepareMulti = true
 				}
 				mods = append(mods, mod)
@@ -336,9 +352,13 @@ func (f *File) statement() ([]*Statement, error) {
 	}
 
 	// ----------------------------------------------------------------------
+	// Replace /*!copy-number*/
+	// ----------------------------------------------------------------------
+	query = strings.ReplaceAll(query, finch.COPY_NUMBER, fmt.Sprintf("%d", f.lb.copyNo))
+
+	// ----------------------------------------------------------------------
 	// Expand CSV /*!csv N val*/
 	// ----------------------------------------------------------------------
-
 	m := reCSV.FindStringSubmatch(query)
 	if len(m) > 0 {
 		n, err := strconv.ParseInt(m[1], 10, 32)
@@ -355,12 +375,9 @@ func (f *File) statement() ([]*Statement, error) {
 		query = reCSV.ReplaceAllLiteralString(query, csv)
 	}
 
-	query = strings.ReplaceAll(query, "%{COPY_NUMBER}", fmt.Sprintf("%d", f.lb.copyNo))
-
 	// ----------------------------------------------------------------------
 	// Data keys: @d -> data.Generator
 	// ----------------------------------------------------------------------
-
 	dataKeys := reData.FindAllString(query, -1)
 	finch.Debug("data keys: %v", dataKeys)
 	if len(dataKeys) == 0 {

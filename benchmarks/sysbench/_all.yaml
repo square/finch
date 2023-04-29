@@ -1,0 +1,26 @@
+# This base config, _all.yaml, applies to all stages in the same directory.
+# It allows only the following 3 config sections:
+
+# __ 01 _____________________________________________________________________
+#
+# MySQL usually applies to all stages because there's usually only 1 MySQL instance.
+# But it could differ if, for example, a setup stage inserts rows on a writable
+# source, and then benchmarks are run on a read-only replica.
+mysql:
+  dsn: "root@tcp(127.0.0.1:3306)/"
+
+# __ 02 _____________________________________________________________________
+#
+# Params usually apply to all stages to keep key settings in sync across stages
+# and trx (SQL) files, like number of tables and rows. Each param is referenced
+# like $params.rows or "${params.rows}". (YAML requires quotes around {}.)
+params:
+  rows: "1000000" # 1M
+
+# __ 03 _____________________________________________________________________
+#
+# Stats don't normally apply to all stages, but it's show here for demonstration.
+# A stage can override this to turn off stats by setting stats.disable=true,
+# as shown in setup.yaml.
+stats:
+  freq: 5s

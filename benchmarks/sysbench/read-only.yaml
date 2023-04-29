@@ -1,0 +1,23 @@
+
+stage:
+  name: read-only
+  runtime: 60s
+  mysql:
+    db: finch
+  workload:
+    - clients: 1
+  trx:
+    - file: trx/read-only.sql
+      data:
+        id:
+          generator: "rand-int"
+          scope: client
+          params:
+            max: $params.rows
+            dist: normal
+        id_100:
+          generator: "int-range"
+          scope: client
+          params:
+            range: 100
+            max: $params.rows

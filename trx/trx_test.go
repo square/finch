@@ -13,6 +13,8 @@ import (
 	"github.com/square/finch/trx"
 )
 
+var p = map[string]string{}
+
 func TestLoad_001(t *testing.T) {
 	// The most basic test: 1 query, 1 @d, nothing fancy.
 	trxList := []config.Trx{
@@ -28,7 +30,7 @@ func TestLoad_001(t *testing.T) {
 	}
 
 	scope := data.NewScope()
-	got, err := trx.Load(trxList, scope)
+	got, err := trx.Load(trxList, scope, p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +59,9 @@ func TestLoad_001(t *testing.T) {
 			},
 			CopiedAt: map[string]finch.RunLevel{},
 		},
+		Meta: map[string]trx.Meta{
+			"001.sql": {DDL: false},
+		},
 	}
 
 	if diff := deep.Equal(got, expect); diff != nil {
@@ -82,7 +87,7 @@ func TestLoad_002(t *testing.T) {
 	}
 
 	scope := data.NewScope()
-	got, err := trx.Load(trxList, scope)
+	got, err := trx.Load(trxList, scope, p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +117,9 @@ func TestLoad_002(t *testing.T) {
 			},
 			CopiedAt: map[string]finch.RunLevel{},
 		},
+		Meta: map[string]trx.Meta{
+			"002.sql": {DDL: false},
+		},
 	}
 
 	if diff := deep.Equal(got, expect); diff != nil {
@@ -136,7 +144,7 @@ func TestLoad_003(t *testing.T) {
 	}
 
 	scope := data.NewScope()
-	got, err := trx.Load(trxList, scope)
+	got, err := trx.Load(trxList, scope, p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,6 +180,9 @@ func TestLoad_003(t *testing.T) {
 				},
 			},
 			CopiedAt: map[string]finch.RunLevel{},
+		},
+		Meta: map[string]trx.Meta{
+			"003.sql": {DDL: false},
 		},
 	}
 
@@ -228,6 +239,9 @@ func TestLoad_copy3(t *testing.T) {
 			},
 			CopiedAt: map[string]finch.RunLevel{},
 		},
+		Meta: map[string]trx.Meta{
+			"copy3": {DDL: false},
+		},
 	}
 
 	trxList := []config.Trx{
@@ -244,7 +258,7 @@ func TestLoad_copy3(t *testing.T) {
 	}
 
 	scope := data.NewScope()
-	got, err := trx.Load(trxList, scope)
+	got, err := trx.Load(trxList, scope, p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +283,7 @@ func TestLoad_copy3(t *testing.T) {
 	}
 
 	scope = data.NewScope()
-	got, err = trx.Load(trxList, scope)
+	got, err = trx.Load(trxList, scope, p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +294,7 @@ func TestLoad_copy3(t *testing.T) {
 }
 
 func TestLoad_COPY_NUMBER(t *testing.T) {
-	// @COPY_NUMBER should be replaced with the copy number
+	// /*!copy-number*/ should be replaced with the copy number
 	expect := &trx.Set{
 		Order: []string{"copyNo"},
 		Statements: map[string][]*trx.Statement{
@@ -301,6 +315,9 @@ func TestLoad_COPY_NUMBER(t *testing.T) {
 			Keys:     map[string]data.Key{},
 			CopiedAt: map[string]finch.RunLevel{},
 		},
+		Meta: map[string]trx.Meta{
+			"copyNo": {DDL: false},
+		},
 	}
 
 	trxList := []config.Trx{
@@ -317,7 +334,7 @@ func TestLoad_COPY_NUMBER(t *testing.T) {
 	}
 
 	scope := data.NewScope()
-	got, err := trx.Load(trxList, scope)
+	got, err := trx.Load(trxList, scope, p)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -62,7 +62,7 @@ type Collector struct {
 }
 
 func NewCollector(cfg config.Stats, hostname string, nInstances uint) (*Collector, error) {
-	finch.Debug("stats: %+v", cfg)
+	finch.Debug("stats: %+v %s %d", cfg, hostname, nInstances)
 	freq, _ := time.ParseDuration(cfg.Freq) // already validated
 
 	reporters, err := MakeReporters(cfg)

@@ -1,0 +1,12 @@
+
+stage:
+  mysql:
+    dsn: root@tcp(127.0.0.1:3306)/
+  
+  runtime: 2s
+  
+  workload:
+    - clients: $sys.CPU_CORES
+  
+  trx:
+    - file: select-1.sql

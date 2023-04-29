@@ -85,7 +85,7 @@ func (g *RandInt) Copy(r finch.RunLevel) Generator {
 	return c
 }
 
-func (g *RandInt) Values(_ finch.ExecCount) []interface{} {
+func (g *RandInt) Values(_ ExecCount) []interface{} {
 	switch g.dist {
 	case dist_normal:
 		v := int64(math.Floor(rand.NormFloat64()*g.stddev + g.mean))
@@ -137,10 +137,10 @@ func NewIntRange(id Id, params map[string]string) (*IntRange, error) {
 		return nil, err
 	}
 	if g.min >= g.max {
-		return nil, fmt.Errorf("invalid int range: max not greater than min")
+		return nil, fmt.Errorf("invalid int range: min %d >= max %d", g.min, g.max)
 	}
 	if g.size > (g.max - g.min) {
-		return nil, fmt.Errorf("invalid int range: size > max - min")
+		return nil, fmt.Errorf("invalid int range: size %d > (max %d - min %d)", g.size, g.max, g.min)
 	}
 	return g, nil
 }
@@ -154,7 +154,7 @@ func (g *IntRange) Copy(r finch.RunLevel) Generator {
 	return gCopy
 }
 
-func (g *IntRange) Values(_ finch.ExecCount) []interface{} {
+func (g *IntRange) Values(_ ExecCount) []interface{} {
 	// MySQL BETWEEN is closed interval [min, max], so if random min (lower)
 	// is 10 and size is 3, then 10+3=13 but that's 4 values: 10, 11, 12, 13.
 	// So we -1 to make BETWEEEN 10 AND 12, which is 3 values.
@@ -201,7 +201,7 @@ func NewProjectInt(id Id, params map[string]string) (ProjectInt, error) {
 
 	output_start, err := strconv.ParseFloat(p[0], 64)
 	if err != nil {
-		return ProjectInt{}, fmt.Errorf("invalid output-max: %s: %s", p[0], err)
+		return ProjectInt{}, fmt.Errorf("invalid output-min: %s: %s", p[0], err)
 	}
 	output_end, err := strconv.ParseFloat(p[1], 64)
 	if err != nil {
@@ -228,7 +228,7 @@ func (g ProjectInt) Copy(r finch.RunLevel) Generator {
 	return c
 }
 
-func (g ProjectInt) Values(_ finch.ExecCount) []interface{} {
+func (g ProjectInt) Values(_ ExecCount) []interface{} {
 	input := rand.Intn(g.input_range)
 	return []interface{}{int(g.output_start + math.Floor((g.slope*float64(input))+0.5))}
 }

@@ -4,21 +4,12 @@ package main
 
 import (
 	"log"
-	"runtime"
 
-	"github.com/square/finch/startup"
+	"github.com/square/finch/boot"
 )
 
 func main() {
-	runtime.GOMAXPROCS(2 * runtime.NumCPU())
-
-	f := &startup.Finch{}
-
-	if err := f.Boot(startup.Env{}); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := f.Run(); err != nil {
+	if err := boot.Up(boot.Env{}); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -46,7 +46,7 @@ func (g *StrNotNull) Copy(r finch.RunLevel) Generator {
 	return NewStrNotNull(g.id.Copy(r), g.n)
 }
 
-func (g *StrNotNull) Values(_ finch.ExecCount) []interface{} {
+func (g *StrNotNull) Values(_ ExecCount) []interface{} {
 	sb := strings.Builder{}
 	sb.Grow(g.n)
 	// A src.Int63() generates 63 random bits, enough for letterIdxMax characters!

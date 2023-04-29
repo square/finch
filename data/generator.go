@@ -28,7 +28,7 @@ func init() {
 type Generator interface {
 	Format() string
 	Copy(finch.RunLevel) Generator
-	Values(finch.ExecCount) []interface{}
+	Values(ExecCount) []interface{}
 	Scan(any interface{}) error
 	Id() Id
 }
