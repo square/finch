@@ -4,7 +4,9 @@ package compute
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"sync"
 
 	"github.com/rs/xid"
 
@@ -45,28 +47,28 @@ func (s *Server) Boot(ctxFinch context.Context, cfg config.Stage) error {
 	var err error
 
 	nInstances := finch.Uint(cfg.Compute.Instances)
-	log.Printf("Boot %s (%d instances)", cfg.Name, nInstances)
-
-	// Clear previous stage, if any. This happens with multiple stages and --run=false.
-	// We'll boot 1st stage (but not run), then clear it and boot 2nd stage, etc. This
-	// call might block for a few milliseconds because API has to reset remotes that are
-	// waiting to run.
-	if s.api != nil && s.stage != nil {
-		log.Println("Clear previously booted stage")
-		if err := s.api.Stage(nil); err != nil {
-			return err
-		}
+	nRemotes := nInstances - 1 // -1 for local unless..
+	if cfg.Compute.DisableLocal {
+		nRemotes += 1 // no local, so all instances are remote
+	}
+	if nRemotes == 0 {
+		fmt.Printf("#\n# %s\n#\n", cfg.Name)
+	} else {
+		cfg.Id = xid.New().String() // unique stage ID for remotes
+		fmt.Printf("#\n# %s (%s)\n#\n", cfg.Name, cfg.Id)
 	}
 
 	s.gds.Reset() // keep data from globally-scoped generators; delete the rest
 
 	s.stage = &metaStage{
+		Mutex:      &sync.Mutex{},
 		cfg:        cfg,
-		sid:        xid.New().String(),
 		nInstances: nInstances,
+		nRemotes:   nRemotes,
 		bootChan:   make(chan ack, nInstances),
 		runChan:    make(chan struct{}),
 		doneChan:   make(chan ack, nInstances),
+		remotes:    map[string]*remote{},
 	}
 
 	if !config.True(cfg.Stats.Disable) {
@@ -89,7 +91,7 @@ func (s *Server) Boot(ctxFinch context.Context, cfg config.Stage) error {
 	}
 
 	// Set stage in API to trigger remote instances to boot
-	if s.api != nil {
+	if s.api != nil && nRemotes > 0 {
 		if err := s.api.Stage(s.stage); err != nil {
 			return err
 		}
@@ -100,7 +102,7 @@ func (s *Server) Boot(ctxFinch context.Context, cfg config.Stage) error {
 	// But with remotes, this might take a few milliseconds over the network.
 	booted := uint(0)
 	for booted < s.stage.nInstances {
-		log.Printf("Have %d compute instances, need %d", booted, nInstances)
+		log.Printf("Have %d instances, need %d", booted, nInstances)
 		select {
 		case ack := <-s.stage.bootChan:
 			if ack.err != nil {
@@ -124,10 +126,6 @@ func (s *Server) Run(ctxFinch context.Context) error {
 	stageName := s.stage.cfg.Name
 	finch.Debug("run %s", stageName)
 
-	if s.api != nil {
-		defer s.api.Stage(nil) // clear stage when done running
-	}
-
 	close(s.stage.runChan) // signal remotes to run
 
 	if s.stage.local != nil { // start local instance
@@ -140,7 +138,7 @@ func (s *Server) Run(ctxFinch context.Context) error {
 	// Wait for instances to finish running
 	done := uint(0)
 	for done < s.stage.nInstances {
-		log.Printf("%d instances running...", s.stage.nInstances-done)
+		log.Printf("%d/%d instances running", s.stage.nInstances-done, s.stage.nInstances)
 		select {
 		case ack := <-s.stage.doneChan:
 			done += 1
@@ -150,13 +148,12 @@ func (s *Server) Run(ctxFinch context.Context) error {
 				log.Printf("%s completed stage %s", ack.name, stageName)
 			}
 		case <-ctxFinch.Done():
-			return nil
+			// Signal remote instances to stop early and (maybe) send finals stats
+			if s.api != nil {
+				s.api.Stage(nil)
+			}
 		}
 	}
 
 	return nil
-}
-
-func (s *Server) Shutdown() {
-	//s.httpServer.Close()
 }

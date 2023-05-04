@@ -34,6 +34,7 @@ type Stage struct {
 	Compute  Compute           `yaml:"compute,omitempty"`
 	Disable  bool              `yaml:"disable"`
 	FileName string            `yaml:"-"`
+	Id       string            `yaml:"-"`
 	Name     string            `yaml:"name"`
 	MySQL    MySQL             `yaml:"mysql,omitempty"`
 	N        uint              `yaml:"-"`
@@ -42,6 +43,7 @@ type Stage struct {
 	Runtime  string            `yaml:"runtime,omitempty"`
 	Stats    Stats             `yaml:"stats,omitempty"`
 	TPS      string            `yaml:"tps,omitempty"` // uint
+	Test     bool              `yaml:"-"`
 	Trx      []Trx             `yaml:"trx,omitempty"`
 	Workload []ClientGroup     `yaml:"workload,omitempty"`
 }

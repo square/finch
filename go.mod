@@ -4,7 +4,6 @@ go 1.20
 
 require (
 	github.com/alexflint/go-arg v1.4.3
-	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
 	github.com/dustin/go-humanize v1.0.0
 	github.com/go-ini/ini v1.67.0
 	github.com/go-mysql/errors v0.0.0-20180603193453-03314bea68e0

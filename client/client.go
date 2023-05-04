@@ -146,7 +146,7 @@ func (c *Client) Cleanup() {
 }
 
 func (c *Client) Run(ctxExec context.Context) {
-	finch.Debug("run client %s: %d stmts, runtime %s, iters %d/%d/%d", c.RunLevel.ClientId(), len(c.Statements), c.IterExecGroup, c.IterClients, c.Iter)
+	finch.Debug("run client %s: %d stmts, iter %d/%d/%d", c.RunLevel.ClientId(), len(c.Statements), c.IterExecGroup, c.IterClients, c.Iter)
 
 	var err error
 	var runtimeElapsed bool

@@ -9,8 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-
-	"github.com/common-nighthawk/go-figure"
+	"time"
 
 	"github.com/square/finch"
 	"github.com/square/finch/compute"
@@ -63,8 +62,10 @@ func Up(env Env) error {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, os.Interrupt)
 		<-c
-		log.Println("\nCaught CTRL-C")
+		log.Println("Caught CTRL-C")
 		cancel()
+		<-time.After(7500 * time.Millisecond) // 7.5s
+		os.Exit(0)
 	}()
 
 	//  If --client specified, run in client mode connected to a Finch server.
@@ -83,7 +84,11 @@ func Up(env Env) error {
 	if len(cmdline.Args) == 1 {
 		log.Fatal("No config file specified")
 	}
-	cfgStages, err := config.Load(cmdline.Args[1:], cmdline.Options.Params)
+	cfgStages, err := config.Load(
+		cmdline.Args[1:],
+		cmdline.Options.Params,
+		cmdline.Options.DSN,
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -96,15 +101,17 @@ func Up(env Env) error {
 			log.Fatal(err)
 		}
 
-		// Print stage name as big ASCII text banner to make it easier to see
-		// separate stages
-		myFigure := figure.NewFigure(cfg.Name, "", true)
-		myFigure.Print()
+		cfg.Test = cmdline.Options.Test // Pass --test to remotes, if any
 
 		// Boot the stage: prepares everything, connects to MySQL, but doesn't
 		// not execute any queries
 		if err := server.Boot(ctx, cfg); err != nil {
 			log.Fatal(err)
+		}
+
+		if ctx.Err() != nil {
+			finch.Debug("finch terminated")
+			break
 		}
 
 		// If --test, don't run the stage; just boot the next stage

@@ -29,11 +29,12 @@ func NewServer(opts map[string]string) (Server, error) {
 	r := Server{
 		server:    opts["server"], // for logging
 		client:    proto.NewClient(opts["client"], opts["server"]),
-		statsChan: make(chan Instance, 1),
+		statsChan: make(chan Instance, 5),
 
 		stopChan: make(chan struct{}),
 		doneChan: make(chan struct{}),
 	}
+	r.client.StageId = opts["stage-id"] // from compute/client.run
 	go r.report()
 	return r, nil
 }
@@ -57,30 +58,26 @@ func (r Server) Report(from []Instance) {
 }
 
 func (r Server) Stop() {
-	close(r.stopChan)
+	finch.Debug("stopping")
+	close(r.statsChan)
 	select {
-	case <-time.After(5 * time.Second):
-		log.Println("Timeout sending last stats")
 	case <-r.doneChan:
 		finch.Debug("remote stats done")
+	case <-time.After(5 * time.Second):
+		log.Println("Timeout sending last stats")
 	}
 }
 
 func (r Server) report() {
 	defer close(r.doneChan)
-	for {
-		select {
-		case <-r.stopChan:
-			return
-		case s := <-r.statsChan:
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			err := r.client.Send(ctx, "/stats", s)
-			cancel()
-			if err != nil {
-				log.Printf("Failed to send stats: %s\n%+v\n", err, s)
-				continue
-			}
-			finch.Debug("sent stats to %s", r.server)
+	for s := range r.statsChan {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := r.client.Send(ctx, "/stats", s, 3, 200*time.Millisecond)
+		cancel()
+		if err != nil {
+			log.Printf("Failed to send stats: %s\n%+v\n", err, s)
+			continue
 		}
+		finch.Debug("sent stats to %s", r.server)
 	}
 }

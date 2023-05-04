@@ -33,7 +33,7 @@ type stageFile struct {
 	Stage Stage `yaml:"stage"`
 }
 
-func Load(files []string, kvparams []string) ([]Stage, error) {
+func Load(files []string, kvparams []string, dsn string) ([]Stage, error) {
 	var err error
 	base := map[string]*Base{}
 	stages := []Stage{}
@@ -97,6 +97,11 @@ func Load(files []string, kvparams []string) ([]Stage, error) {
 		// --param foo=bar on command line overrides .params in config files
 		for k, v := range params {
 			f.Stage.Params[k] = v
+		}
+
+		// --dsn on command line overrides config files
+		if dsn != "" {
+			f.Stage.MySQL.DSN = dsn
 		}
 
 		// interpolate $vars -> values (see Vars func below)

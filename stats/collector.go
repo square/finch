@@ -44,7 +44,7 @@ func (in *Instance) Combine(from []Instance) {
 // If config.stats.freq is set, stats are collected/reported at that frequency.
 // Else, they're collected/reported once when the stage finishes.
 type Collector struct {
-	freq       time.Duration
+	Freq       time.Duration
 	trx        [][]*Trx   // lock-free trx stats per client
 	stats      [][]*Stats // stats per trx (per client)
 	local      Instance   // local instance stats
@@ -71,7 +71,7 @@ func NewCollector(cfg config.Stats, hostname string, nInstances uint) (*Collecto
 	}
 
 	return &Collector{
-		freq:     freq,
+		Freq:     freq,
 		stopChan: make(chan struct{}),
 		doneChan: make(chan struct{}),
 		local: Instance{
@@ -112,17 +112,17 @@ func (c *Collector) Watch(trx []*Trx) {
 // a goroutine is started to call Collect at the configured frequency, which is
 // stopped when Stop is called.
 func (c *Collector) Start() {
-	finch.Debug("start (freq %s)", c.freq)
+	finch.Debug("start (freq %s)", c.Freq)
 	now := Now()
 	c.start = now
 	c.last = now
-	if c.freq == 0 {
+	if c.Freq == 0 {
 		return
 	}
 
 	// Collect stats periodically; stopped by Stop
 	go func() {
-		ticker := time.NewTicker(c.freq)
+		ticker := time.NewTicker(c.Freq)
 		for { // ticker
 			select {
 			case <-ticker.C:
@@ -140,10 +140,10 @@ func (c *Collector) Start() {
 // finishes (in Stage.Run). It stops the goroutine started in Start, if periodic
 // stats are enabled (config.stats.freq > 0).
 func (c *Collector) Stop() {
-	finch.Debug("stop")
 	c.stopped = true
-	if c.freq > 0 {
-		// Handle reporting race condition. Support freq=2s and runtime=2s.
+	finch.Debug("stop")
+	if c.Freq > 0 {
+		// Handle reporting race condition. Suppose freq=2s and runtime=2s.
 		// When run ends, either the ticker in that ^ goroutine can exec first
 		// and report the last interval, or closing stopChan can exec first
 		// and close the goroutine, causing last interval not to be reported.
@@ -237,7 +237,7 @@ func (c *Collector) Recv(in Instance) bool {
 	// are lost, so the interval doesn't complete. This will report a partial interval.
 	if in.Interval > c.intervalNo {
 		log.Printf("Received next stats interval (%d) before current interval (%d) complete; reporting incomplete current interval; next stats: %+v", in.Interval, c.intervalNo, in)
-		c.report()
+		c.Report()
 		c.interval[0] = in
 		c.n = 1
 		return true
@@ -253,17 +253,21 @@ func (c *Collector) Recv(in Instance) bool {
 
 	// Received all stats in this interval
 	finch.Debug("interval %d complete", c.intervalNo)
-	c.report()
+	c.Report()
 	return true
 }
 
-func (c *Collector) report() {
+func (c *Collector) Report() {
 	for _, r := range c.reporters {
 		r.Report(c.interval[0:c.n])
 	}
 	c.intervalNo += 1
 	c.n = 0
 	if c.stopped {
+		finch.Debug("stopping reporters")
+		for _, r := range c.reporters {
+			r.Stop()
+		}
 		close(c.finalChan)
 	}
 }

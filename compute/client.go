@@ -5,9 +5,9 @@ package compute
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,52 +46,51 @@ func NewClient(name, addr string) *Client {
 }
 
 func (c *Client) Run(ctxFinch context.Context) error {
-	defer func() {
-		log.Println("Sending stop signal")
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		c.client.Send(ctx, "/stop", nil) // Send retries
-		cancel()
-	}()
-
 	for {
 		c.gds.Reset() // keep data from globally-scoped generators; delete the rest
 		if err := c.run(ctxFinch); err != nil {
-			if errors.Is(err, context.Canceled) {
+			if ctxFinch.Err() != nil {
 				return nil
 			}
 			log.Println(err)
-			time.Sleep(1 * time.Second)
+			time.Sleep(2 * time.Second) // prevent uncontrolled error loop
 		}
 	}
 }
 
 func (c *Client) run(ctxFinch context.Context) error {
-	// Fetch config file from remote server
+	// ------------------------------------------------------------------
+	// Fetch stage fails (wait for GET /boot to return)
 	var cfg config.Stage
 	log.Printf("Waiting to boot from %s...", c.addr)
-	_, body, err := c.client.Get(ctxFinch, "/boot", nil)
-	if err != nil {
-		return err // Get retries so error is final
-	}
-	if err := json.Unmarshal(body, &cfg); err != nil {
-		return fmt.Errorf("cannot decode config.File struct from server: %s", err)
-	}
-
-	// Fetch workload files from remote server if they don't exist locally
-	tmpdir, err := os.MkdirTemp("", "finch")
+	_, body, err := c.client.Get(ctxFinch, "/boot", nil, -1, 2*time.Second)
 	if err != nil {
 		return err
+	}
+	if err := json.Unmarshal(body, &cfg); err != nil {
+		return fmt.Errorf("cannot decode stage config file from server: %s", err)
+	}
+	stageName := cfg.Name
+	c.client.StageId = cfg.Id
+	defer func() { c.client.StageId = "" }()
+	fmt.Printf("#\n# %s (%s)\n#\n", stageName, cfg.Id)
+
+	// ----------------------------------------------------------------------
+	// Fetch all stage and trx files from server, put in local temp dir
+	tmpdir, err := os.MkdirTemp("", "finch")
+	if err != nil {
+		return fmt.Errorf("cannot make temp dir: %s", err)
 	}
 	if !finch.Debugging {
 		defer os.RemoveAll(tmpdir)
 	}
-	log.Printf("Tmp dir for stage files: %s", tmpdir)
-
+	finch.Debug("tmp dir: %s", tmpdir)
 	if err := c.getTrxFiles(ctxFinch, cfg, tmpdir); err != nil {
 		return err
 	}
 
-	// Create and boot local instance
+	// ------------------------------------------------------------------
+	// Local boot and ack
 	for k := range cfg.Stats.Report {
 		if k == "stdout" {
 			continue
@@ -99,51 +98,87 @@ func (c *Client) run(ctxFinch context.Context) error {
 		delete(cfg.Stats.Report, k)
 	}
 	cfg.Stats.Report["server"] = map[string]string{
-		"server": c.addr,
-		"client": c.name,
+		"server":   c.addr,
+		"client":   c.name,
+		"stage-id": c.client.StageId,
 	}
 	stats, err := stats.NewCollector(cfg.Stats, c.name, 1)
 	if err != nil {
-		if !finch.Debugging {
-			os.RemoveAll(tmpdir)
-		}
-		c.client.Error(err)
 		return err
 	}
 
+	log.Printf("[%s] Booting", stageName)
 	local := NewLocal(c.name, c.gds, stats)
 	if err := local.Boot(ctxFinch, cfg); err != nil {
-		if !finch.Debugging {
-			os.RemoveAll(tmpdir)
-		}
-		c.client.Error(err)
+		log.Printf("[%s] Boot error, notifying server: %s", err)
+		c.client.Send(ctxFinch, "/boot", err.Error(), 3, 500*time.Millisecond) // don't care if this fails
+		return err                                                             // return original error not Send error
+	}
+
+	// Boot ack; don't continue on error because we're no longer in sync with server
+	log.Printf("[%s] Boot successful, notifying server", stageName)
+	if err := c.client.Send(ctxFinch, "/boot", nil, 10, 1*time.Second); err != nil {
+		log.Printf("[%s] Sending book ack to server failed: %s", stageName, err)
 		return err
 	}
 
-	// Notify server that we're ready to run
-	log.Println("Sending boot signal")
-	if err := c.client.Send(ctxFinch, "/boot", nil); err != nil {
-		return err // Send retries so error is final
-	}
-
-	log.Println("Waiting for run signal")
-	_, body, err = c.client.Get(ctxFinch, "/run", nil)
+	// ----------------------------------------------------------------------
+	// Wait for run signal. This might be a little while if server is for
+	// other remote instances.
+	log.Printf("[%s] Waiting for run signal", stageName)
+	resp, body, err := c.client.Get(ctxFinch, "/run", nil, 100, 1*time.Second)
 	if err != nil {
-		return err // Get retires so error is final
+		log.Printf("[%s] Timeout waiting for run signal after successful boot, giving up (is the server offline?)", stageName)
+		return err
 	}
-	//if resp.StatusCode == http.StatusNoContent {
-
-	stageName := cfg.Name // shortcut
-	log.Printf("Running stage %s", stageName)
-	if err := local.Run(ctxFinch); err != nil {
-		log.Printf("Error running stage %s: %s", stageName, err)
-		log.Println("Sending error signal")
-		c.client.Error(err)
+	if resp.StatusCode == http.StatusResetContent {
+		log.Printf("[%s] Boot test successful", stageName)
+		return nil
 	}
 
-	log.Println("Sending stage-done signal")
-	if err := c.client.Send(ctxFinch, "/run", nil); err != nil {
-		log.Fatal(err) // Send retries so error is fatal
+	// ----------------------------------------------------------------------
+	// Local run and ack
+	ctxRun, cancelRun := context.WithCancel(ctxFinch)
+	doneChan := make(chan struct{})
+	defer close(doneChan)
+	lostServer := false
+	stageDone := false
+	go func() {
+		defer cancelRun()
+		for {
+			time.Sleep(1 * time.Second)
+			select {
+			case <-doneChan:
+				finch.Debug("stop check goroutine stopped")
+				return
+			default:
+			}
+			resp, _, err := c.client.Get(ctxFinch, "/ping", nil, 5, 1*time.Second)
+			if err != nil {
+				log.Printf("[%s] Lost contact with server while running, aborting", stageName)
+				lostServer = true
+				return
+			}
+			if resp.StatusCode == http.StatusResetContent {
+				stageDone = true
+				log.Printf("[%s] Server stopped stage", stageName)
+				return
+			}
+		}
+	}()
+
+	log.Printf("[%s] Running", stageName)
+	if err := local.Run(ctxRun); err != nil {
+		log.Printf("[%s] Run stopped: %v (lost server:%v stage stopped:%v); sending done signal to server (5s timeout)", stageName, err, lostServer, stageDone)
+	} else {
+		log.Printf("[%s] Completed successfully; sending done signal to server (5s timeout)", stageName)
+	}
+
+	// Run ack; ok if this fails because we're done, nothing left to sync with server
+	ctxDone, ctxCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer ctxCancel()
+	if err := c.client.Send(ctxDone, "/run", err, 5, 500*time.Millisecond); err != nil {
+		log.Printf("[%s] Sending done signal to server failed, ignoring: %s", stageName, err)
 	}
 
 	return nil
@@ -161,7 +196,7 @@ func (c *Client) getTrxFiles(ctxFinch context.Context, cfg config.Stage, tmpdir 
 			{"stage", cfg.Name},
 			{"i", fmt.Sprintf("%d", i)},
 		}
-		resp, body, err := c.client.Get(ctxFinch, "/file", ref)
+		resp, body, err := c.client.Get(ctxFinch, "/file", ref, 5, 300*time.Millisecond)
 		if err != nil {
 			return err // Get retries so error is final
 		}
@@ -178,7 +213,7 @@ func (c *Client) getTrxFiles(ctxFinch context.Context, cfg config.Stage, tmpdir 
 		if err := f.Close(); err != nil {
 			return err
 		}
-		log.Printf("Wrote %s", filename)
+		finch.Debug("wrote %s", filename)
 		trx[i].File = filename
 	}
 	return nil

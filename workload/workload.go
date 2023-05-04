@@ -38,8 +38,9 @@ type Allocator struct {
 //
 //	[]config.ClientGroup -> Groups -> Clients -> [][]workload.ClientGroup
 type ClientGroup struct {
-	Runtime time.Duration // used by Stage to create a single ctx for all clients in the group
-	Clients []*client.Client
+	Runtime   time.Duration // used by Stage to create a single ctx for all clients in the group
+	DataLimit bool
+	Clients   []*client.Client
 }
 
 func (a *Allocator) Groups() ([][]int, error) {
@@ -250,6 +251,11 @@ func (a *Allocator) Clients(groups [][]int, withStats bool) ([][]ClientGroup, er
 							finch.Debug("    insert-id %s", g.Id().String())
 						}
 
+						if stmt.Limit != nil {
+							clients[egNo][cgNo].DataLimit = true
+							finch.Debug("trx %s has data limit", trxName)
+						}
+
 						n++
 					} // query
 					c.Data[n-1].TrxBoundary |= trx.END // finch trx file, not MySQL trx
@@ -293,21 +299,6 @@ func (a *Allocator) AutoAssign() []config.ClientGroup {
 			prevHasDDL = false
 		}
 	}
-
-	/*
-
-		dataLimit := false
-		for i := range a.TrxSet.Statements[trxName] {
-			if a.TrxSet.Statements[trxName][i].Limit != nil {
-				dataLimit = true
-				break
-			}
-		}
-		if dataLimit {
-			finch.Debug("trx %s has data limit; iter=0", trxName)
-			a.Workload[i].Iter = 0
-		}
-	*/
 
 	return cg
 }

@@ -15,8 +15,9 @@ type Options struct {
 	Help    bool
 	Client  string   `arg:"env:FINCH_CLIENT"`
 	Debug   bool     `arg:"env:FINCH_DEBUG"`
+	DSN     string   `arg:"env:FINCH_DSN"`
 	Params  []string `arg:"-p,--param,separate"`
-	Server  string   `arg:"env:FINCH_SERVER"`
+	Server  string   `arg:"env:FINCH_SERVER" default:"127.0.0.1:33075"`
 	Test    bool     `arg:"env:FINCH_TEST"`
 	Version bool
 }
@@ -51,6 +52,7 @@ func printHelp() {
 		"Options:\n"+
 		"  --client ADDR[:PORT]  Run as client controlled by server at ADDR (default port: %s)\n"+
 		"  --debug               Print debug output to stderr\n"+
+		"  --dsn                 MySQL DSN (overrides stage files)\n"+
 		"  --help                Print help and exit\n"+
 		"  --param (-p) KEY=VAL  Set param key=value (override stage files)\n"+
 		"  --server ADDR[:PORT]  Run as server listening for clients on ADDR (default port: %s)\n"+
