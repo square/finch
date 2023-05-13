@@ -2,11 +2,15 @@
 stage:
   mysql:
     dsn: root@tcp(127.0.0.1:3306)/
-  
-  runtime: 2s
-  
+
+# compute:
+#   instances: 2
+# 
+  runtime: 10s
+
   workload:
-    - clients: $sys.CPU_CORES
+    - clients: 1 # $sys.CPU_CORES
+      qps: 10
   
   trx:
     - file: select-1.sql

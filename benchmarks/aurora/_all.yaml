@@ -3,3 +3,5 @@
 params:
   tables: 250
   rows: 25000
+  instances: 4
+  clients: 1000 # per instance

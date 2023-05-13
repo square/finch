@@ -1,23 +1,26 @@
 
-- runtime: 60s
+stage:
+  name: write-only
+  runtime: 60s
+  mysql:
+    db: finch
   workload:
     - clients: 1
-      iter: 4
   trx:
-    - file: write-only.sql
+    - file: trx/write-only.sql
       data:
         id:
           generator: "rand-int"
           params:
             min: 1
-            max: 1000000
+            max: $params.rows
             dist: normal
         del_id:
           generator: "rand-int"
           scope: trx
           params:
             min: 1
-            max: 1000000
+            max: $params.rows
             dist: normal
         k:
           generator: "rand-int"

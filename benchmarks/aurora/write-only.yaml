@@ -1,45 +1,47 @@
 
-name: "write-only"
-runtime: 600s
-compute:
-  instances: 4
-workload:
-  - clients: 1000 # * 4 instances = 4k clients total
-stats:
-  report:
-    stdout:
-      each-instance: true
-      combined: true
-trx:
-  - file: write-only.sql
-    data:
-      n: # table number to query
-        generator: "rand-int"
-        scope: trx # must be trx-scoped
-        params:
-          max: $params.tables
-          dist: uniform
-      id: # primary key
-        generator: "rand-int"
-        params:
-          max: $params.rows
-          dist: uniform
-      del_id: # primary key that's deleted then re-inserted
-        generator: "rand-int"
-        scope: trx # must be trx-scoped; spans last 2 queries
-        params:
-          max: $params.rows
-          dist: uniform
-      k:
-        generator: "rand-int"
-        params:
-          max: 65536 # non-unique index on k, so higher max = more keys
-      c:
-        generator: "str-not-null"
-        params:
-          len: 119 # not a typo; c values are 119 chars long
-      pad:
-        generator: "str-not-null"
-        params:
-          len: 59 # not a typo; pad values are 59 chars long
+stage:
+  name: "write-only"
+  runtime: 600s
+  compute:
+    instances: $params.instances
+  workload:
+    - clients: $params.clients
+  stats:
+    report:
+      stdout:
+        percentiles: "95"
+        each-instance: true
+        combined: true
+  trx:
+    - file: trx/write-only.sql
+      data:
+        tableNo: # table number to query
+          generator: "rand-int"
+          scope: trx # must be trx-scoped
+          params:
+            max: $params.tables
+            dist: uniform
+        id: # primary key
+          generator: "rand-int"
+          params:
+            max: $params.rows
+            dist: uniform
+        del_id: # primary key that's deleted and re-inserted
+          generator: "rand-int"
+          scope: trx # must be trx-scoped; spans last 2 queries
+          params:
+            max: $params.rows
+            dist: uniform
+        k: # random int, non-unique secondary index
+          generator: "rand-int"
+          params:
+            max: 65536 # higher max = more keys
+        c: # random string data (not indexed)
+          generator: "str-not-null"
+          params:
+            len: 119 # 119 1-byte chars + \0 byte = char(120)
+        pad: # random string data (not indexed)
+          generator: "str-not-null"
+          params:
+            len: 59 # 59 1-byte chars + \0 byte = char(60)
 

@@ -1,6 +1,20 @@
 
-setup:
+stage:
+  name: setup
   trx:
-    - file: trx/create-table.sql
+    - file: trx/create-tables.sql
     - file: trx/insert-rows.sql
-    - file: trx/analzye-table.sql
+      data:
+        k:
+          generator: "rand-int"
+          params:
+            max: 65536
+        c:
+          generator: "str-not-null"
+          params:
+            len: 119 # not a typo
+        pad:
+          generator: "str-not-null"
+          params:
+            len: 59 # not a typo
+    - file: trx/analyze-tables.sql

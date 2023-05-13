@@ -7,7 +7,7 @@
 # But it could differ if, for example, a setup stage inserts rows on a writable
 # source, and then benchmarks are run on a read-only replica.
 mysql:
-  dsn: "root@tcp(127.0.0.1:3306)/"
+  dsn: "root@tcp(127.0.0.1:3306)/sbtest"
 
 # __ 02 _____________________________________________________________________
 #
@@ -15,7 +15,7 @@ mysql:
 # and trx (SQL) files, like number of tables and rows. Each param is referenced
 # like $params.rows or "${params.rows}". (YAML requires quotes around {}.)
 params:
-  rows: "1000000" # 1M
+  rows: "1,000,000" # You can use human-readable numbers like this or "1M" 
 
 # __ 03 _____________________________________________________________________
 #
