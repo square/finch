@@ -91,19 +91,19 @@ func NewStage(fileName string, n int, b *Base) Stage {
 
 func (c *Stage) Vars() error {
 	var err error
-	c.Name, err = Vars(c.Name, c.Params)
+	c.Name, err = Vars(c.Name, c.Params, false)
 	if err != nil {
 		return err
 	}
-	c.Runtime, err = Vars(c.Runtime, c.Params)
+	c.Runtime, err = Vars(c.Runtime, c.Params, false)
 	if err != nil {
 		return err
 	}
-	c.QPS, err = Vars(c.QPS, c.Params)
+	c.QPS, err = Vars(c.QPS, c.Params, true)
 	if err != nil {
 		return err
 	}
-	c.TPS, err = Vars(c.TPS, c.Params)
+	c.TPS, err = Vars(c.TPS, c.Params, true)
 	if err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ func (c *Stage) Vars() error {
 	}
 
 	for k, v := range c.Params {
-		c.Params[k], err = Vars(v, c.Params)
+		c.Params[k], err = Vars(v, c.Params, true)
 		if err != nil {
 			return fmt.Errorf("in params: %s", err)
 		}
@@ -238,7 +238,7 @@ type Compute struct {
 
 func (c *Compute) Vars(params map[string]string) error {
 	var err error
-	c.Instances, err = Vars(c.Instances, params)
+	c.Instances, err = Vars(c.Instances, params, true)
 	if err != nil {
 		return err
 	}
@@ -265,11 +265,11 @@ type Trx struct {
 
 func (c *Trx) Vars(params map[string]string) error {
 	var err error
-	c.Name, err = Vars(c.Name, params)
+	c.Name, err = Vars(c.Name, params, false)
 	if err != nil {
 		return err
 	}
-	c.File, err = Vars(c.File, params)
+	c.File, err = Vars(c.File, params, false)
 	if err != nil {
 		return err
 	}
@@ -293,24 +293,24 @@ type Data struct {
 
 func (c *Data) Vars(params map[string]string) error {
 	var err error
-	c.Name, err = Vars(c.Name, params)
+	c.Name, err = Vars(c.Name, params, false)
 	if err != nil {
 		return err
 	}
-	c.Generator, err = Vars(c.Generator, params)
+	c.Generator, err = Vars(c.Generator, params, false)
 	if err != nil {
 		return err
 	}
-	c.Scope, err = Vars(c.Scope, params)
+	c.Scope, err = Vars(c.Scope, params, false)
 	if err != nil {
 		return err
 	}
-	c.DataType, err = Vars(c.DataType, params)
+	c.DataType, err = Vars(c.DataType, params, false)
 	if err != nil {
 		return err
 	}
 	for k, v := range c.Params {
-		c.Params[k], err = Vars(v, params)
+		c.Params[k], err = Vars(v, params, true)
 		if err != nil {
 			return err
 		}
@@ -383,48 +383,48 @@ func (c *ClientGroup) Validate(w []Trx) error {
 
 func (c *ClientGroup) Vars(params map[string]string) error {
 	var err error
-	c.Db, err = Vars(c.Db, params)
+	c.Db, err = Vars(c.Db, params, false)
 	if err != nil {
 		return err
 	}
-	c.Clients, err = Vars(c.Clients, params)
+	c.Clients, err = Vars(c.Clients, params, true)
 	if err != nil {
 		return err
 	}
-	c.QPS, err = Vars(c.QPS, params)
+	c.QPS, err = Vars(c.QPS, params, true)
 	if err != nil {
 		return err
 	}
-	c.QPSClients, err = Vars(c.QPSClients, params)
+	c.QPSClients, err = Vars(c.QPSClients, params, true)
 	if err != nil {
 		return err
 	}
-	c.QPSExecGroup, err = Vars(c.QPSExecGroup, params)
+	c.QPSExecGroup, err = Vars(c.QPSExecGroup, params, true)
 	if err != nil {
 		return err
 	}
-	c.TPS, err = Vars(c.TPS, params)
+	c.TPS, err = Vars(c.TPS, params, true)
 	if err != nil {
 		return err
 	}
-	c.TPSClients, err = Vars(c.TPSClients, params)
+	c.TPSClients, err = Vars(c.TPSClients, params, true)
 	if err != nil {
 		return err
 	}
-	c.TPSExecGroup, err = Vars(c.TPSExecGroup, params)
+	c.TPSExecGroup, err = Vars(c.TPSExecGroup, params, true)
 	if err != nil {
 		return err
 	}
-	c.Runtime, err = Vars(c.Runtime, params)
+	c.Runtime, err = Vars(c.Runtime, params, false)
 	if err != nil {
 		return err
 	}
-	c.Name, err = Vars(c.Name, params)
+	c.Name, err = Vars(c.Name, params, false)
 	if err != nil {
 		return err
 	}
 	for i := range c.Trx {
-		c.Trx[i], err = Vars(c.Trx[i], params)
+		c.Trx[i], err = Vars(c.Trx[i], params, false)
 		if err != nil {
 			return err
 		}
@@ -483,31 +483,31 @@ func (c *MySQL) With(def MySQL) {
 
 func (c *MySQL) Vars(params map[string]string) error {
 	var err error
-	c.Database, err = Vars(c.Database, params)
+	c.Database, err = Vars(c.Database, params, false)
 	if err != nil {
 		return err
 	}
-	c.DSN, err = Vars(c.DSN, params)
+	c.DSN, err = Vars(c.DSN, params, false)
 	if err != nil {
 		return err
 	}
-	c.MyCnf, err = Vars(c.MyCnf, params)
+	c.MyCnf, err = Vars(c.MyCnf, params, false)
 	if err != nil {
 		return err
 	}
-	c.Username, err = Vars(c.Username, params)
+	c.Username, err = Vars(c.Username, params, false)
 	if err != nil {
 		return err
 	}
-	c.Password, err = Vars(c.Password, params)
+	c.Password, err = Vars(c.Password, params, false)
 	if err != nil {
 		return err
 	}
-	c.PasswordFile, err = Vars(c.PasswordFile, params)
+	c.PasswordFile, err = Vars(c.PasswordFile, params, false)
 	if err != nil {
 		return err
 	}
-	c.TimeoutConnect, err = Vars(c.TimeoutConnect, params)
+	c.TimeoutConnect, err = Vars(c.TimeoutConnect, params, false)
 	if err != nil {
 		return err
 	}
@@ -599,15 +599,15 @@ func (c *TLS) Validate() error {
 
 func (c *TLS) Vars(params map[string]string) error {
 	var err error
-	c.Cert, err = Vars(c.Cert, params)
+	c.Cert, err = Vars(c.Cert, params, false)
 	if err != nil {
 		return err
 	}
-	c.Key, err = Vars(c.Key, params)
+	c.Key, err = Vars(c.Key, params, false)
 	if err != nil {
 		return err
 	}
-	c.CA, err = Vars(c.CA, params)
+	c.CA, err = Vars(c.CA, params, false)
 	if err != nil {
 		return err
 	}
@@ -694,13 +694,13 @@ func (c *Stats) Validate() error {
 
 func (c *Stats) Vars(params map[string]string) error {
 	var err error
-	c.Freq, err = Vars(c.Freq, params)
+	c.Freq, err = Vars(c.Freq, params, false)
 	if err != nil {
 		return err
 	}
 	for _, r := range c.Report {
 		for k, v := range r {
-			r[k], err = Vars(v, params)
+			r[k], err = Vars(v, params, false)
 			if err != nil {
 				return err
 			}

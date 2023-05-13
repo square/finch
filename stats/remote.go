@@ -71,9 +71,7 @@ func (r Server) Stop() {
 func (r Server) report() {
 	defer close(r.doneChan)
 	for s := range r.statsChan {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		err := r.client.Send(ctx, "/stats", s, 3, 200*time.Millisecond)
-		cancel()
+		err := r.client.Send(context.Background(), "/stats", s, proto.R{300 * time.Millisecond, 10 * time.Millisecond, 3})
 		if err != nil {
 			log.Printf("Failed to send stats: %s\n%+v\n", err, s)
 			continue

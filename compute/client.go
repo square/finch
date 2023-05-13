@@ -17,6 +17,7 @@ import (
 	"github.com/square/finch/config"
 	"github.com/square/finch/data"
 	"github.com/square/finch/proto"
+	"github.com/square/finch/stage"
 	"github.com/square/finch/stats"
 )
 
@@ -46,16 +47,17 @@ func NewClient(name, addr string) *Client {
 }
 
 func (c *Client) Run(ctxFinch context.Context) error {
-	for {
-		c.gds.Reset() // keep data from globally-scoped generators; delete the rest
-		if err := c.run(ctxFinch); err != nil {
-			if ctxFinch.Err() != nil {
-				return nil
-			}
-			log.Println(err)
-			time.Sleep(2 * time.Second) // prevent uncontrolled error loop
+	//for {
+	c.gds.Reset() // keep data from globally-scoped generators; delete the rest
+	if err := c.run(ctxFinch); err != nil {
+		if ctxFinch.Err() != nil {
+			return nil
 		}
+		log.Println(err)
+		time.Sleep(2 * time.Second) // prevent uncontrolled error loop
 	}
+	//}
+	return nil
 }
 
 func (c *Client) run(ctxFinch context.Context) error {
@@ -63,10 +65,12 @@ func (c *Client) run(ctxFinch context.Context) error {
 	// Fetch stage fails (wait for GET /boot to return)
 	var cfg config.Stage
 	log.Printf("Waiting to boot from %s...", c.addr)
-	_, body, err := c.client.Get(ctxFinch, "/boot", nil, -1, 2*time.Second)
+	c.client.PrintErrors = false
+	_, body, err := c.client.Get(ctxFinch, "/boot", nil, proto.R{2 * time.Second, 1 * time.Second, -1})
 	if err != nil {
 		return err
 	}
+	c.client.PrintErrors = true
 	if err := json.Unmarshal(body, &cfg); err != nil {
 		return fmt.Errorf("cannot decode stage config file from server: %s", err)
 	}
@@ -108,16 +112,16 @@ func (c *Client) run(ctxFinch context.Context) error {
 	}
 
 	log.Printf("[%s] Booting", stageName)
-	local := NewLocal(c.name, c.gds, stats)
-	if err := local.Boot(ctxFinch, cfg); err != nil {
+	local := stage.New(cfg, c.gds, stats)
+	if err := local.Prepare(ctxFinch); err != nil {
 		log.Printf("[%s] Boot error, notifying server: %s", err)
-		c.client.Send(ctxFinch, "/boot", err.Error(), 3, 500*time.Millisecond) // don't care if this fails
-		return err                                                             // return original error not Send error
+		c.client.Send(ctxFinch, "/boot", err.Error(), proto.R{500 * time.Millisecond, 100 * time.Millisecond, 3}) // don't care if this fails
+		return err                                                                                                // return original error not Send error
 	}
 
 	// Boot ack; don't continue on error because we're no longer in sync with server
 	log.Printf("[%s] Boot successful, notifying server", stageName)
-	if err := c.client.Send(ctxFinch, "/boot", nil, 10, 1*time.Second); err != nil {
+	if err := c.client.Send(ctxFinch, "/boot", nil, proto.R{1 * time.Second, 100 * time.Millisecond, 10}); err != nil {
 		log.Printf("[%s] Sending book ack to server failed: %s", stageName, err)
 		return err
 	}
@@ -126,7 +130,7 @@ func (c *Client) run(ctxFinch context.Context) error {
 	// Wait for run signal. This might be a little while if server is for
 	// other remote instances.
 	log.Printf("[%s] Waiting for run signal", stageName)
-	resp, body, err := c.client.Get(ctxFinch, "/run", nil, 100, 1*time.Second)
+	resp, _, err := c.client.Get(ctxFinch, "/run", nil, proto.R{60 * time.Second, 100 * time.Millisecond, 3})
 	if err != nil {
 		log.Printf("[%s] Timeout waiting for run signal after successful boot, giving up (is the server offline?)", stageName)
 		return err
@@ -153,7 +157,7 @@ func (c *Client) run(ctxFinch context.Context) error {
 				return
 			default:
 			}
-			resp, _, err := c.client.Get(ctxFinch, "/ping", nil, 5, 1*time.Second)
+			resp, _, err := c.client.Get(ctxFinch, "/ping", nil, proto.R{500 * time.Millisecond, 100 * time.Millisecond, 5})
 			if err != nil {
 				log.Printf("[%s] Lost contact with server while running, aborting", stageName)
 				lostServer = true
@@ -177,7 +181,7 @@ func (c *Client) run(ctxFinch context.Context) error {
 	// Run ack; ok if this fails because we're done, nothing left to sync with server
 	ctxDone, ctxCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer ctxCancel()
-	if err := c.client.Send(ctxDone, "/run", err, 5, 500*time.Millisecond); err != nil {
+	if err := c.client.Send(ctxDone, "/run", err, proto.R{500 * time.Millisecond, 100 * time.Millisecond, 3}); err != nil {
 		log.Printf("[%s] Sending done signal to server failed, ignoring: %s", stageName, err)
 	}
 
@@ -196,7 +200,7 @@ func (c *Client) getTrxFiles(ctxFinch context.Context, cfg config.Stage, tmpdir 
 			{"stage", cfg.Name},
 			{"i", fmt.Sprintf("%d", i)},
 		}
-		resp, body, err := c.client.Get(ctxFinch, "/file", ref, 5, 300*time.Millisecond)
+		resp, body, err := c.client.Get(ctxFinch, "/file", ref, proto.R{5 * time.Second, 100 * time.Millisecond, 3})
 		if err != nil {
 			return err // Get retries so error is final
 		}

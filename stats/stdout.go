@@ -80,7 +80,11 @@ func (r *Stdout) Report(from []Instance) {
 
 func (r *Stdout) print(in *Instance) {
 	s := in.Total
-	line := fmt.Sprintf("%d\t%1.f\t%d\t%d\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\n",
+	var errorCount uint64
+	for _, v := range s.Errors {
+		errorCount += v
+	}
+	line := fmt.Sprintf("%d\t%1.f\t%d\t%d\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\t%s\n",
 		in.Interval,
 		in.Seconds, // duration (of interval)
 		in.Runtime,
@@ -109,6 +113,8 @@ func (r *Stdout) print(in *Instance) {
 		h.Comma(s.Min[COMMIT]),
 		// P
 		h.Comma(s.Max[COMMIT]),
+
+		h.Comma(int64(errorCount)),
 
 		in.Hostname,
 	)

@@ -61,55 +61,67 @@ func (c *Client) Init() error {
 	return nil
 }
 
-func (c *Client) Connect(ctx context.Context, cerr error, query string) bool {
-	if cerr != nil {
-		if _, e := myerr.Error(cerr); e == myerr.ErrDupeKey {
-			log.Printf("Client %s duplciate key, ignorning: %v (%s)", c.RunLevel.ClientId(), cerr, query)
-			return true
-		}
-		log.Printf("Client %s connection error: %s (%s)", c.RunLevel.ClientId(), cerr, query)
+func (c *Client) Connect(ctx context.Context, cerr error, stmtNo int) error {
+	if ctx.Err() != nil { // finch terminated (CTRL-C)?
+		return ctx.Err()
 	}
+
+	// Connect called due to error on query execution?
+	if cerr != nil {
+		switch myerr.MySQLErrorCode(cerr) {
+		case 1213: // deadlock; automatic rollback
+			return nil
+		case 1205: // lock wait timeout; no auto rollback (innodb_rollback_on_timeout=OFF by default)
+			if _, err := c.conn.ExecContext(ctx, "ROLLBACK"); err != nil {
+				return fmt.Errorf("Client %s ROLLBACK after lock_wait_timeout error failed: %v (%s)", c.RunLevel.ClientId(), cerr, c.Statements[stmtNo].Query)
+			}
+			return nil
+		case 1317: // query killed
+			return nil
+		case 1290, 1836: // read-only
+			return nil
+		case 1062: // duplicate key
+			return nil
+		}
+		log.Printf("Client %s connection error: %s (%s)", c.RunLevel.ClientId(), cerr, c.Statements[stmtNo].Query)
+	}
+
 	// Need to close ps and then re-prep
 	if c.conn != nil {
 		c.conn.Close()
 	}
+
+	var err error
 	t0 := time.Now()
-	for i := 0; i < 100; i++ {
-		if ctx.Err() != nil {
-			return false
+	i := 0
+	for {
+		if ctx.Err() != nil { // finch terminated (CTRL-C)?
+			return ctx.Err()
 		}
 
-		var err error
 		c.conn, err = c.DB.Conn(ctx)
-		if err != nil {
-			goto RETRY
+		if err == nil {
+			break // success
 		}
 
-		if c.DefaultDb != "" {
-			_, err = c.conn.ExecContext(ctx, "USE `"+c.DefaultDb+"`")
-		} else {
-			err = c.conn.PingContext(ctx)
-		}
-		if err != nil {
-			goto RETRY
-		}
-
-		if cerr != nil {
-			log.Printf("Client %s reconnected in %s", c.RunLevel.ClientId(), time.Now().Sub(t0))
-		}
-		return true // success; keep running
-
-	RETRY:
 		if i%10 == 0 {
 			log.Printf("Client %s error reconnecting: %s (retrying)", c.RunLevel.ClientId(), err)
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(500 * time.Millisecond)
+		i += 1
 	}
-	log.Printf("Client %s failed to reconnect to MySQL; stopping early", c.RunLevel.ClientId())
-	return false // cannot reconnect; stop running
-}
 
-func (c *Client) Prepare(ctxExec context.Context) error {
+	if cerr != nil {
+		log.Printf("Client %s reconnected in %s", c.RunLevel.ClientId(), time.Now().Sub(t0))
+	}
+
+	if c.DefaultDb != "" {
+		_, err = c.conn.ExecContext(ctx, "USE `"+c.DefaultDb+"`")
+		if err != nil {
+			return err
+		}
+	}
+
 	for i, s := range c.Statements {
 		if !s.Prepare {
 			continue
@@ -117,10 +129,9 @@ func (c *Client) Prepare(ctxExec context.Context) error {
 		if c.ps[i] != nil {
 			continue // prepare multi
 		}
-		var err error
-		c.ps[i], err = c.conn.PrepareContext(ctxExec, s.Query)
+		c.ps[i], err = c.conn.PrepareContext(ctx, s.Query)
 		if err != nil {
-			return fmt.Errorf("prepare %s: %w", s.Query, err)
+			return fmt.Errorf("Client %s error preparing %s: %v", c.RunLevel.ClientId(), s.Query, err)
 		}
 
 		// If s.PrepareMulti = 3, it means this ps should be used for 3 statments
@@ -133,43 +144,31 @@ func (c *Client) Prepare(ctxExec context.Context) error {
 	return nil
 }
 
-func (c *Client) Cleanup() {
-	// Must close prepared statments before returning to DoneChan to ensure
-	// Finch doesn't exit before we're closed them, else we'll leak them in
-	// MySQL.
-	for i := range c.ps {
-		if c.ps[i] == nil {
-			continue
-		}
-		c.ps[i].Close()
-	}
-}
-
 func (c *Client) Run(ctxExec context.Context) {
 	finch.Debug("run client %s: %d stmts, iter %d/%d/%d", c.RunLevel.ClientId(), len(c.Statements), c.IterExecGroup, c.IterClients, c.Iter)
-
 	var err error
-	var runtimeElapsed bool
-
 	defer func() {
 		if r := recover(); r != nil {
 			b := make([]byte, 4096)
 			n := runtime.Stack(b, false)
 			err = fmt.Errorf("PANIC: %v\n%s", r, string(b[0:n]))
 		}
-		// If the runtime elapses, err can be a "context canceled" error,
-		// which we can ignore.
-		if !runtimeElapsed {
-			c.Error = err
+		for i := range c.ps {
+			if c.ps[i] == nil {
+				continue
+			}
+			c.ps[i].Close()
 		}
+		if c.conn != nil {
+			c.conn.Close()
+		}
+		c.Error = err
 		c.DoneChan <- c
 	}()
 
-	c.Connect(ctxExec, nil, "")
-	if err = c.Prepare(ctxExec); err != nil {
+	if err = c.Connect(ctxExec, nil, -1); err != nil {
 		return
 	}
-	defer c.Cleanup()
 
 	var rows *sql.Rows
 	var res sql.Result
@@ -250,23 +249,13 @@ ITER:
 					c.Stats[trxNo].Record(stats.READ, time.Now().Sub(t).Microseconds())
 				}
 				if err != nil {
-					if ctxExec.Err() != nil {
-						err = nil
-						return
-					}
-					if !c.Connect(ctxExec, err, c.Statements[i].Query) {
-						return
-					}
-					continue ITER
+					goto ERROR
 				}
 				if c.Data[i].Outputs != nil {
 					for rows.Next() {
 						if err = rows.Scan(c.Data[i].Outputs...); err != nil {
 							rows.Close()
-							if !c.Connect(ctxExec, err, c.Statements[i].Query) {
-								return
-							}
-							continue ITER
+							goto ERROR
 						}
 					}
 				}
@@ -299,14 +288,7 @@ ITER:
 					}
 				}
 				if err != nil { // handle err, if any -----------------------
-					if ctxExec.Err() != nil {
-						err = nil
-						return
-					}
-					if !c.Connect(ctxExec, err, c.Statements[i].Query) {
-						return
-					}
-					continue ITER
+					goto ERROR
 				}
 				if c.Statements[i].Limit != nil { // limit rows -------------
 					n, _ := res.RowsAffected()
@@ -317,6 +299,17 @@ ITER:
 					c.Data[i].InsertId.Scan(id)
 				}
 			} // execute
+			continue // next query
+
+		ERROR:
+			if err = c.Connect(ctxExec, err, i); err != nil {
+				return // unrecoverable error or runtime elapsed (context timeout/cancel)
+			}
+			if c.Stats[trxNo] != nil {
+				c.Stats[trxNo].Error(myerr.MySQLErrorCode(err))
+			}
+			continue ITER // restart after recoverable error (e.g. deadlock, lock timeout)
+
 		} // statements
 	} // iterations
 }

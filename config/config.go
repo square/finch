@@ -187,7 +187,7 @@ var reAllDigits = regexp.MustCompile(`^\d+$`)
 // Vars changes $params.foo and $FOO to param values and environment variable
 // values, respectively, and human numbers to integers (1k -> 1000).
 // "${var}" is also valid but YAML requires string quotes around {}.
-func Vars(s string, params map[string]string) (string, error) {
+func Vars(s string, params map[string]string, numbers bool) (string, error) {
 	for _, r := range varRE {
 		m := r.FindAllStringSubmatch(s, -1)
 		if len(m) == 0 {
@@ -224,6 +224,10 @@ func Vars(s string, params map[string]string) (string, error) {
 		finch.Debug("var: %s -> %v", s, rep)
 		r := strings.NewReplacer(rep...)
 		s = r.Replace(s)
+	}
+
+	if !numbers {
+		return s, nil
 	}
 
 	// Look for human numbers like 1k and 1,000

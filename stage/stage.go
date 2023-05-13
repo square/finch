@@ -11,6 +11,7 @@ import (
 	"github.com/square/finch/client"
 	"github.com/square/finch/config"
 	"github.com/square/finch/data"
+	"github.com/square/finch/dbconn"
 	"github.com/square/finch/limit"
 	"github.com/square/finch/stats"
 	"github.com/square/finch/trx"
@@ -39,10 +40,25 @@ func New(cfg config.Stage, gds *data.Scope, stats *stats.Collector) *Stage {
 	}
 }
 
-func (s *Stage) Prepare() error {
+func (s *Stage) Prepare(ctxFinch context.Context) error {
 	if len(s.cfg.Trx) == 0 {
 		panic("Stage.Prepare called with zero trx")
 	}
+
+	// Test connection to MySQL
+	dbconn.SetFactory(s.cfg.MySQL, nil)
+	db, dsnRedacted, err := dbconn.Make()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		return err
+	}
+	log.Printf("Connected to %s", dsnRedacted)
 
 	// Load and validate all config.stage.trx files. This makes and validates all
 	// data generators, too. Being valid means only that the Finch config/setup is
@@ -135,7 +151,7 @@ EXEC_GROUPS:
 			var ctxClients context.Context
 			var cancelClients context.CancelFunc
 			if s.execGroups[i][j].Runtime > 0 {
-				finch.Debug("%d/%d exec %s", s.execGroups[i][j].Runtime)
+				finch.Debug("eg %d/%d exec %s", s.execGroups[i][j].Runtime)
 				ctxClients, cancelClients = context.WithDeadline(ctxStage, time.Now().Add(s.execGroups[i][j].Runtime))
 				defer cancelClients()
 			} else {

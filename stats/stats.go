@@ -27,10 +27,11 @@ const (
 // If there are 8 clients running 2 trx, then there are 16 instances of Stats
 // which is half of the lock-free design. The other half is Trx.
 type Stats struct {
-	Buckets [][]uint64 // response time (μs) for percentiles
-	Min     []int64    // response time (μs)
-	Max     []int64    // response time (μs)
-	N       []uint64   // number of events (queries)
+	Buckets [][]uint64        // response time (μs) for percentiles
+	Min     []int64           // response time (μs)
+	Max     []int64           // response time (μs)
+	N       []uint64          // number of events (queries)
+	Errors  map[uint16]uint64 // count MySQL error codes
 }
 
 func NewStats() *Stats {
@@ -44,6 +45,7 @@ func NewStats() *Stats {
 		Min:     make([]int64, nEventTypes),
 		Max:     make([]int64, nEventTypes),
 		N:       make([]uint64, nEventTypes),
+		Errors:  map[uint16]uint64{},
 	}
 }
 
@@ -99,6 +101,9 @@ func (s *Stats) Reset() {
 		s.Max[i] = 0
 		s.N[i] = 0
 	}
+	for k := range s.Errors {
+		s.Errors[k] = 0
+	}
 }
 
 // Copy copies all stats from c, overwriting all values in s. Calling Reset before
@@ -109,6 +114,9 @@ func (s *Stats) Copy(c *Stats) {
 		s.Min[i] = c.Min[i]
 		s.Max[i] = c.Max[i]
 		s.N[i] = c.N[i]
+	}
+	for k, v := range c.Errors {
+		s.Errors[k] = v
 	}
 }
 
@@ -127,6 +135,9 @@ func (s *Stats) Combine(c *Stats) {
 			s.Max[i] = c.Max[i]
 		}
 		s.N[i] += c.N[i]
+	}
+	for k, v := range c.Errors {
+		s.Errors[k] += v
 	}
 }
 
@@ -228,6 +239,10 @@ func NewTrx(name string) *Trx {
 
 func (t *Trx) Record(eventType byte, d int64) {
 	t.sp.Load().Record(eventType, d)
+}
+
+func (t *Trx) Error(n uint16) {
+	t.sp.Load().Errors[n] += 1
 }
 
 func (t *Trx) Swap() *Stats {

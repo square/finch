@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"time"
 
 	"github.com/square/finch"
@@ -17,6 +16,7 @@ import (
 )
 
 func init() {
+	log.SetOutput(os.Stdout)
 	log.SetFlags(log.Ldate | log.Lmicroseconds | log.Lshortfile)
 }
 
@@ -56,6 +56,8 @@ func Up(env Env) error {
 		return nil
 	}
 
+	log.Println(finch.SystemParams)
+
 	// Catch CTRL-C and cancel the main context, which should cause a clean shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -71,7 +73,7 @@ func Up(env Env) error {
 	//  If --client specified, run in client mode connected to a Finch server.
 	// In client mode, we don't need a config file because everything is fetched
 	// from the server.
-	if serverAddr := cmdline.Options.Client; serverAddr != "" {
+	if serverAddr := cmdline.Options.Server; serverAddr != "" {
 		clientName, _ := os.Hostname()
 		client := compute.NewClient(clientName, finch.WithPort(serverAddr, finch.DEFAULT_SERVER_PORT))
 		return client.Run(ctx)
@@ -82,9 +84,9 @@ func Up(env Env) error {
 
 	// Load and validate all stage config files specified on the command line
 	if len(cmdline.Args) == 1 {
-		log.Fatal("No config file specified")
+		log.Fatal("No stage file specified. Run finch --help for usage.")
 	}
-	cfgStages, err := config.Load(
+	stages, err := config.Load(
 		cmdline.Args[1:],
 		cmdline.Options.Params,
 		cmdline.Options.DSN,
@@ -94,36 +96,6 @@ func Up(env Env) error {
 	}
 
 	// Boot and run each stage specified on the command line
-	server := compute.NewServer("local", cmdline.Options.Server)
-	for _, cfg := range cfgStages {
-		// cd dir of config file so relative file paths in config work
-		if err := os.Chdir(filepath.Dir(cfg.FileName)); err != nil {
-			log.Fatal(err)
-		}
-
-		cfg.Test = cmdline.Options.Test // Pass --test to remotes, if any
-
-		// Boot the stage: prepares everything, connects to MySQL, but doesn't
-		// not execute any queries
-		if err := server.Boot(ctx, cfg); err != nil {
-			log.Fatal(err)
-		}
-
-		if ctx.Err() != nil {
-			finch.Debug("finch terminated")
-			break
-		}
-
-		// If --test, don't run the stage; just boot the next stage
-		if cmdline.Options.Test {
-			continue
-		}
-
-		// Run the stage. This is where all the traditional benchmark work starts.
-		if err := server.Run(ctx); err != nil {
-			log.Println(err)
-		}
-	}
-
-	return nil
+	server := compute.NewServer("local", cmdline.Options.Bind, cmdline.Options.Test)
+	return server.Run(ctx, stages)
 }

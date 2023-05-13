@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -20,13 +19,19 @@ import (
 
 var ErrFailed = errors.New("request failed after attempts, or context cancelled")
 
+type R struct {
+	Timeout time.Duration
+	Wait    time.Duration
+	Tries   int
+}
+
 type Client struct {
 	name       string
 	serverAddr string
 	// --
-	client  *http.Client
-	errNo   int
-	StageId string
+	client      *http.Client
+	StageId     string
+	PrintErrors bool
 }
 
 func NewClient(name, server string) *Client {
@@ -38,37 +43,33 @@ func NewClient(name, server string) *Client {
 	}
 }
 
-func (c *Client) reset() {
-	c.errNo = 0
+func (c *Client) Get(ctx context.Context, endpoint string, params [][]string, r R) (*http.Response, []byte, error) {
+	return c.request(ctx, "GET", endpoint, params, nil, r)
 }
 
-// retry is called for all errors and returns true if the caller should continue
-// try, else it returns false and the caller should return.
-func (c *Client) retry(ctx context.Context, err error, wait time.Duration) bool {
-	if ctx.Err() != nil {
-		return false // stop trying; parent context cancelled
-	}
-	finch.Debug("%v", err)
-	if c.errNo%20 == 0 {
-		log.Printf("Request error, retrying: %v", err)
-	}
-	c.errNo++
-	time.Sleep(wait)
-	return true // keep trying
+func (c *Client) Send(ctx context.Context, endpoint string, data interface{}, r R) error {
+	_, _, err := c.request(ctx, "POST", endpoint, nil, data, r)
+	return err
 }
 
-func (c *Client) Get(ctx context.Context, endpoint string, params [][]string, tries int, wait time.Duration) (*http.Response, []byte, error) {
-	defer c.reset()
+func (c *Client) request(ctx context.Context, method string, endpoint string, params [][]string, data interface{}, r R) (*http.Response, []byte, error) {
 	url := c.URL(endpoint, params)
-	finch.Debug("GET %s", url)
+	finch.Debug("%s %s", method, url)
+
+	buf := new(bytes.Buffer)
+	if data != nil {
+		json.NewEncoder(buf).Encode(data)
+	}
+
 	var err error
 	var body []byte
 	var req *http.Request
 	var resp *http.Response
-	retry := true
-	for i := 0; retry && (tries == -1 || i < tries); i++ {
-		ctxReq, cancelReq := context.WithTimeout(ctx, 2*time.Second)
-		req, _ = http.NewRequestWithContext(ctxReq, "GET", url, nil)
+	try := 0
+	for r.Tries == -1 || try < r.Tries {
+		try += 1
+		ctxReq, cancelReq := context.WithTimeout(ctx, r.Timeout)
+		req, _ = http.NewRequestWithContext(ctxReq, method, url, buf)
 		resp, err = c.client.Do(req)
 		cancelReq()
 		if err != nil {
@@ -87,59 +88,20 @@ func (c *Client) Get(ctx context.Context, endpoint string, params [][]string, tr
 		case http.StatusResetContent:
 			return resp, nil, nil // reset
 		default:
-			finch.Debug("unknown http response: %v", resp)
 			goto RETRY
 		}
 
 	RETRY:
-		retry = c.retry(ctx, err, wait)
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
+		finch.Debug("%v", err)
+		if c.PrintErrors && try%20 == 0 {
+			log.Printf("Request error, retrying: %v", err)
+		}
+		time.Sleep(r.Wait)
 	}
 	return nil, nil, ErrFailed
-}
-
-func (c *Client) Send(ctx context.Context, endpoint string, data interface{}, tries int, wait time.Duration) error {
-	defer c.reset()
-	url := c.URL(endpoint, nil)
-	finch.Debug("POST %s", url)
-
-	buf := new(bytes.Buffer)
-	if data != nil {
-		json.NewEncoder(buf).Encode(data)
-	}
-
-	var err error
-	var body []byte
-	var req *http.Request
-	var resp *http.Response
-	retry := true
-	for i := 0; retry && (tries == -1 || i < tries); i++ {
-		ctxReq, cancelReq := context.WithTimeout(ctx, 2*time.Second)
-		req, _ = http.NewRequestWithContext(ctxReq, "POST", url, buf)
-		resp, err = c.client.Do(req)
-		cancelReq()
-		if err != nil {
-			goto RETRY
-		}
-
-		body, err = io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			return err
-		}
-
-		if resp.StatusCode >= 500 {
-			err = fmt.Errorf("server error: %s: %s", resp.Status, string(body))
-			goto RETRY
-		}
-		if resp.StatusCode >= 400 {
-			return fmt.Errorf("client error: %s: %s", resp.Status, string(body))
-		}
-		return nil // success
-
-	RETRY:
-		retry = c.retry(ctx, err, wait)
-	}
-	return ErrFailed
 }
 
 func (c *Client) URL(path string, params [][]string) string {

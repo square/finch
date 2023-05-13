@@ -12,12 +12,12 @@ import (
 
 // Options represents the command line options
 type Options struct {
+	Bind    string `arg:"env:FINCH_BIND" default:":33075"`
+	Debug   bool   `arg:"env:FINCH_DEBUG"`
+	DSN     string `arg:"env:FINCH_DSN"`
 	Help    bool
-	Client  string   `arg:"env:FINCH_CLIENT"`
-	Debug   bool     `arg:"env:FINCH_DEBUG"`
-	DSN     string   `arg:"env:FINCH_DSN"`
 	Params  []string `arg:"-p,--param,separate"`
-	Server  string   `arg:"env:FINCH_SERVER" default:"127.0.0.1:33075"`
+	Server  string   `arg:"env:FINCH_SERVER"`
 	Test    bool     `arg:"env:FINCH_TEST"`
 	Version bool
 }
@@ -50,17 +50,16 @@ func printHelp() {
 	fmt.Printf("Usage:\n"+
 		"  finch [options] STAGE_1_FILE [STAGE_N_FILE...]\n\n"+
 		"Options:\n"+
-		"  --client ADDR[:PORT]  Run as client controlled by server at ADDR (default port: %s)\n"+
+		"  --bind ADDR[:PORT]    Listen for clients on ADDR, or \"-\" to disable server API (default: :%s)\n"+
 		"  --debug               Print debug output to stderr\n"+
 		"  --dsn                 MySQL DSN (overrides stage files)\n"+
 		"  --help                Print help and exit\n"+
 		"  --param (-p) KEY=VAL  Set param key=value (override stage files)\n"+
-		"  --server ADDR[:PORT]  Run as server listening for clients on ADDR (default port: %s)\n"+
+		"  --server ADDR[:PORT]  Connect to server at ADDR\n"+
 		"  --test                Validate stages, test connections, and exit\n"+
 		"  --version             Print version and exit\n"+
 		"\n"+
 		"finch %s\n",
-		finch.DEFAULT_SERVER_PORT,
 		finch.DEFAULT_SERVER_PORT,
 		finch.VERSION,
 	)

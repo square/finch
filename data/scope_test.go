@@ -35,6 +35,9 @@ func TestScope_Trx(t *testing.T) {
 		Generator: g,
 	}
 
+	// ----------------------------------------------------------------------
+	// Client 1
+
 	g1 := scope.Copy(keyName, r) // COPY 1
 	id := g1.Id()
 	if id.CopyNo != 1 {
@@ -89,6 +92,21 @@ func TestScope_Trx(t *testing.T) {
 	gotRL = scope.CopiedAt[keyName]
 	if diff := deep.Equal(gotRL, expectRL); diff != nil {
 		t.Error(diff)
+	}
+
+	// ----------------------------------------------------------------------
+	// Client 2
+	r.Client = 2
+	r.Trx = 1
+	r.Query = 1
+
+	g5 := scope.Copy(keyName, r)
+	id = g5.Id()
+	if id.CopyNo != 3 {
+		t.Errorf("got copy %d, expected 3 after client change: %+v", id.CopyNo, id)
+	}
+	if g5 == g4 {
+		t.Errorf("got same generator, expected different after client change")
 	}
 }
 

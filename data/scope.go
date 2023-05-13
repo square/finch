@@ -56,7 +56,7 @@ func NewScope() *Scope {
 	}
 }
 
-func (s *Scope) Copy(keyName string, runlevel finch.RunLevel) Generator {
+func (s *Scope) Copy(keyName string, rl finch.RunLevel) Generator {
 	if keyName == "@PREV" {
 		return nil
 	}
@@ -68,7 +68,7 @@ func (s *Scope) Copy(keyName string, runlevel finch.RunLevel) Generator {
 
 	switch scope {
 	case "", finch.SCOPE_STATEMENT:
-		return k.Generator.Copy(runlevel)
+		return k.Generator.Copy(rl)
 	case finch.SCOPE_GLOBAL:
 		return k.Generator
 	}
@@ -80,21 +80,21 @@ func (s *Scope) Copy(keyName string, runlevel finch.RunLevel) Generator {
 		// Scopes stage == workload because currently there's no config.stage.iterations.
 		// If that's added, then we'll need to add Scope.Workload uint and increment that
 		// count whenever the stage is re-run.
-		cp = runlevel.Stage != prev.Stage
+		cp = rl.Stage != prev.Stage
 	case finch.SCOPE_EXEC_GROUP:
-		cp = runlevel.ExecGroup > prev.ExecGroup
+		cp = rl.ExecGroup > prev.ExecGroup
 	case finch.SCOPE_CLIENT_GROUP:
-		cp = runlevel.ClientGroup > prev.ClientGroup
+		cp = rl.ClientGroup > prev.ClientGroup
 	case finch.SCOPE_CLIENT:
-		cp = runlevel.Client > prev.Client
+		cp = rl.Client > prev.Client
 	case finch.SCOPE_TRX:
-		cp = runlevel.Trx > prev.Trx
+		cp = rl.Trx > prev.Trx || rl.Client > prev.Client
 	default:
 		panic("invalid scope: " + scope)
 	}
 	if cp {
-		s.CopyOf[keyName] = k.Generator.Copy(runlevel)
-		s.CopiedAt[k.Name] = runlevel
+		s.CopyOf[keyName] = k.Generator.Copy(rl)
+		s.CopiedAt[k.Name] = rl
 	}
 	return s.CopyOf[keyName]
 }
@@ -105,6 +105,8 @@ func (s *Scope) Reset() {
 			continue
 		}
 		delete(s.Keys, keyName)
+		delete(s.CopyOf, keyName)
+		delete(s.CopiedAt, keyName)
 	}
 }
 

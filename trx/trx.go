@@ -165,7 +165,7 @@ func (f *File) line(line string) error {
 			if line == "-- EOF" {
 				return ErrEOF
 			}
-			mod, err := config.Vars(strings.TrimSpace(strings.TrimPrefix(line, "--")), f.params)
+			mod, err := config.Vars(strings.TrimSpace(strings.TrimPrefix(line, "--")), f.params, true)
 			if err != nil {
 				return fmt.Errorf("parsing modifier '%s' on line %d: %s", line, f.lb.n, err)
 			}

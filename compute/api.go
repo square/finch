@@ -21,7 +21,7 @@ import (
 type API struct {
 	*sync.Mutex
 	httpServer *http.Server
-	stage      *metaStage // current stage
+	stage      *stageMeta // current stage
 	prev       map[string]string
 }
 
@@ -32,25 +32,22 @@ const (
 	running
 )
 
-type metaStage struct {
+type stageMeta struct {
 	*sync.Mutex
-	cfg        config.Stage
-	nInstances uint
-	nRemotes   uint
-	bootChan   chan ack         // 1. <-remote after booting stage
-	runChan    chan struct{}    // 2. server closes to signal remotes to run
-	doneChan   chan ack         // 3. <-remote after running stage
-	stats      *stats.Collector // receives stats from remotes while running
-	local      *Local           // local instance if not config.compute.disable-local
-	done       bool
-	remotes    map[string]*remote
+	cfg      config.Stage
+	nRemotes uint
+	bootChan chan ack         // 1. <-client after booting stage
+	runChan  chan struct{}    // 2. server closes to signal clients to run
+	doneChan chan ack         // 3. <-client after running stage
+	stats    *stats.Collector // receives stats from clients while running
+	booted   bool
+	done     bool
+	clients  map[string]*client
 }
 
-// Remote is a remote compute (rc): Finch running as a client on another computer
-// connecting to this computer (which is the server).
-type remote struct {
+type client struct {
 	name  string
-	stage *metaStage
+	stage *stageMeta
 	state byte
 }
 
@@ -59,7 +56,7 @@ func NewAPI(addr string) *API {
 		Mutex: &sync.Mutex{},
 	}
 
-	// HTTP server that remote instances calls
+	// HTTP server that client instances calls
 	mux := http.NewServeMux()
 	mux.HandleFunc("/boot", a.boot)
 	mux.HandleFunc("/file", a.file)
@@ -95,7 +92,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	a.httpServer.Handler.ServeHTTP(w, r)
 }
 
-func (a *API) Stage(newStage *metaStage) error {
+func (a *API) Stage(newStage *stageMeta) error {
 	if newStage != nil {
 		finch.Debug("new stage %s (%s)", newStage.cfg.Name, newStage.cfg.Id)
 	}
@@ -112,7 +109,7 @@ func (a *API) Stage(newStage *metaStage) error {
 	oldStage := a.stage
 	a.Unlock()
 
-	// Signal remotes that stage has stopped early
+	// Signal clients that stage has stopped early
 	finch.Debug("stop old stage %s (%s)", oldStage.cfg.Name, oldStage.cfg.Id)
 	oldStage.Lock()
 	oldStage.done = true
@@ -121,19 +118,19 @@ func (a *API) Stage(newStage *metaStage) error {
 	}
 	oldStage.Unlock()
 
-	// Wait for remotes to check in (GET /run), be signaled that stage.done=true,
+	// Wait for clients to check in (GET /run), be signaled that stage.done=true,
 	// send final stats, then call POST /run to terminate
 	timeout := time.After(3 * time.Second)
 	for {
 		time.Sleep(100 * time.Millisecond)
 		select {
 		case <-timeout:
-			finch.Debug("timeout waiting for remotes to reset")
+			finch.Debug("timeout waiting for clients to reset")
 			break
 		default:
 		}
 		oldStage.Lock()
-		n := len(oldStage.remotes)
+		n := len(oldStage.clients)
 		oldStage.Unlock()
 		if n == 0 {
 			break
@@ -141,28 +138,27 @@ func (a *API) Stage(newStage *metaStage) error {
 	}
 
 	oldStage.Lock()
-	if len(oldStage.remotes) > 0 {
-		log.Printf("%d remotes did not stop, ignoring (stats will be lost): %v", len(oldStage.remotes), oldStage.remotes)
+	if len(oldStage.clients) > 0 {
+		log.Printf("%d clients did not stop, ignoring (stats will be lost): %v", len(oldStage.clients), oldStage.clients)
 	}
 	oldStage.Unlock()
 
 	// Set new stage now that old stage has stopped
 	a.Lock()
 	a.stage = newStage
-	finch.Debug("new stage %s (%s) set", newStage.cfg.Name, newStage.cfg.Id)
 	a.Unlock()
 
 	return nil
 }
 
 func (a *API) boot(w http.ResponseWriter, r *http.Request) {
-	rc, get, ok := a.remote(w, r, true) // true == allow new remotes on GET /boot
+	rc, get, ok := a.client(w, r, true) // true == allow new clients on GET /boot
 	if !ok {
-		return // remote() wrote error response
+		return // client() wrote error response
 	}
 
 	if get {
-		// GET /boot: remote is booting, waiting to receive config.File
+		// GET /boot: client is booting, waiting to receive config.File
 		if rc.state != ready {
 			w.WriteHeader(http.StatusPreconditionFailed)
 			return
@@ -181,23 +177,23 @@ func (a *API) boot(w http.ResponseWriter, r *http.Request) {
 
 			// Is the stage still booting (waiting for instances)?
 			stage.Lock()
-			if len(stage.remotes) == int(stage.nRemotes) {
+			if stage.booted || len(stage.clients) == int(stage.nRemotes) {
 				stage.Unlock()
 				a.Unlock()
 				goto RETRY // stage is full
 			}
 
-			// Stage is ready and there's a space for this remote
-			stage.remotes[rc.name] = rc
+			// Stage is ready and there's a space for this client
+			stage.clients[rc.name] = rc
 			rc.stage = stage
-			rc.state = booting // advance remote state
+			rc.state = booting // advance client state
 
 			// Unwind locks before sending stage config via HTTP in case net is slow
 			stage.Unlock()
 			a.Unlock()
 
-			finch.Debug("assigned %s to stage %s (%s): %d of %d remotes", rc.name, stage.cfg.Name, stage.cfg.Id,
-				len(stage.remotes), stage.nRemotes)
+			finch.Debug("assigned %s to stage %s (%s): %d of %d clients", rc.name, stage.cfg.Name, stage.cfg.Id,
+				len(stage.clients), stage.nRemotes)
 			json.NewEncoder(w).Encode(stage.cfg) // send stage config
 			return
 
@@ -205,7 +201,7 @@ func (a *API) boot(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(200 * time.Millisecond)
 		}
 	} else {
-		// POST /boot: remote is ack'ing previous GET /boot; body is error message, if any
+		// POST /boot: client is ack'ing previous GET /boot; body is error message, if any
 		if rc.state != booting {
 			w.WriteHeader(http.StatusPreconditionFailed)
 			return
@@ -213,7 +209,7 @@ func (a *API) boot(w http.ResponseWriter, r *http.Request) {
 
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			log.Printf("error reading error from remote: %s", err)
+			log.Printf("error reading error from client: %s", err)
 			return
 		}
 		r.Body.Close()
@@ -221,22 +217,22 @@ func (a *API) boot(w http.ResponseWriter, r *http.Request) {
 
 		// Remote might fail to boot. If that's the case, do not advance its state;
 		// it should call GET /boot again to reset itself and try again.
-		var remoteErr error
+		var clientErr error
 		if string(body) != "" {
-			// Don't advance state: remote failed to boot, so it's not ready to run
-			remoteErr = fmt.Errorf("%s", string(body))
+			// Don't advance state: client failed to boot, so it's not ready to run
+			clientErr = fmt.Errorf("%s", string(body))
 		} else {
-			rc.state = runnable // advance remote state (successful boot)
+			rc.state = runnable // advance client state (successful boot)
 		}
-		rc.stage.bootChan <- ack{name: rc.name, err: remoteErr}
+		rc.stage.bootChan <- ack{name: rc.name, err: clientErr}
 
 	}
 }
 
 func (a *API) file(w http.ResponseWriter, r *http.Request) {
-	rc, _, ok := a.remote(w, r, false)
+	rc, _, ok := a.client(w, r, false)
 	if !ok {
-		return // remote() wrote error response
+		return // client() wrote error response
 	}
 
 	if rc.state != booting {
@@ -283,7 +279,7 @@ func (a *API) file(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Sending file %s to %s...", s.Trx[i].File, rc.name)
 
-	// Read file and send it to the remote instance
+	// Read file and send it to the client instance
 	bytes, err := ioutil.ReadFile(s.Trx[i].File)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -295,13 +291,13 @@ func (a *API) file(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) run(w http.ResponseWriter, r *http.Request) {
-	rc, get, ok := a.remote(w, r, false)
+	rc, get, ok := a.client(w, r, false)
 	if !ok {
-		return // remote() wrote error response
+		return // client() wrote error response
 	}
 
 	if get {
-		// GET /run: remote is waiting for signal to run previously booted stage
+		// GET /run: client is waiting for signal to run previously booted stage
 		if rc.state != runnable {
 			w.WriteHeader(http.StatusPreconditionFailed)
 			return
@@ -315,18 +311,23 @@ func (a *API) run(w http.ResponseWriter, r *http.Request) {
 		// which will stop the old stage and trigger this block.
 		rc.stage.Lock()
 		if rc.stage.done {
-			delete(rc.stage.remotes, rc.name)
+			delete(rc.stage.clients, rc.name)
 			rc.stage.Unlock()
 			w.WriteHeader(http.StatusResetContent) // reset
 			return
 		}
 		rc.stage.Unlock()
 
-		rc.state = running           // advance remote state
-		w.WriteHeader(http.StatusOK) // @todo handler error
-		log.Printf("Started remote %s on stage %s\n", rc.name, rc.stage.cfg.Name)
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte{0}); err != nil {
+			log.Printf("Lost client %s on stage %s, but it will return\n", rc.name, rc.stage.cfg.Name)
+			return
+		}
+
+		log.Printf("Started client %s on stage %s\n", rc.name, rc.stage.cfg.Name)
+		rc.state = running // advance client state
 	} else {
-		// POST /run: remote is done running stage
+		// POST /run: client is done running stage
 		if rc.state != running {
 			w.WriteHeader(http.StatusPreconditionFailed)
 			return
@@ -334,34 +335,34 @@ func (a *API) run(w http.ResponseWriter, r *http.Request) {
 
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			// Ignore error; it doesn't change fact that remote is done
-			log.Printf("Error reading error from remote on POST /run, ignoring: %s", err)
+			// Ignore error; it doesn't change fact that client is done
+			log.Printf("Error reading error from client on POST /run, ignoring: %s", err)
 		}
 		r.Body.Close()
 		w.WriteHeader(http.StatusOK)
 
 		rc.stage.Lock()
-		delete(rc.stage.remotes, rc.name)
+		delete(rc.stage.clients, rc.name)
 		rc.stage.Unlock()
 
-		// Tell server remote completed stage
-		var remoteErr error
+		// Tell server client completed stage
+		var clientErr error
 		if string(body) != "" {
-			remoteErr = fmt.Errorf("%s", string(body))
+			clientErr = fmt.Errorf("%s", string(body))
 		}
-		rc.stage.doneChan <- ack{name: rc.name, err: remoteErr}
-		rc.state = ready // advance remote state (ready to run another stage)
+		rc.stage.doneChan <- ack{name: rc.name, err: clientErr}
+		rc.state = ready // advance client state (ready to run another stage)
 	}
 }
 
 func (a *API) stats(w http.ResponseWriter, r *http.Request) {
-	rc, _, ok := a.remote(w, r, false)
+	rc, _, ok := a.client(w, r, false)
 	if !ok {
-		return // remote() wrote error response
+		return // client() wrote error response
 	}
 
 	// Stats are sent only while running. If this error occurs, it might just be
-	// a network issue that delayed stats sent earlier (before remote stopped running).
+	// a network issue that delayed stats sent earlier (before client stopped running).
 	// If it happens frequently, then it's probably a bug in Finch.
 	if rc.state != running {
 		w.WriteHeader(http.StatusPreconditionFailed)
@@ -370,7 +371,7 @@ func (a *API) stats(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("error reading error from remote: %s", err)
+		log.Printf("error reading error from client: %s", err)
 		return
 	}
 	r.Body.Close()
@@ -388,9 +389,9 @@ func (a *API) stats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) ping(w http.ResponseWriter, r *http.Request) {
-	rc, _, ok := a.remote(w, r, false)
+	rc, _, ok := a.client(w, r, false)
 	if !ok {
-		return // remote() wrote error response
+		return // client() wrote error response
 	}
 	rc.stage.Lock()
 	done := rc.stage.done
@@ -405,7 +406,7 @@ func (a *API) ping(w http.ResponseWriter, r *http.Request) {
 
 // --------------------------------------------------------------------------
 
-func (a *API) remote(w http.ResponseWriter, r *http.Request, boot bool) (*remote, bool, bool) {
+func (a *API) client(w http.ResponseWriter, r *http.Request, boot bool) (*client, bool, bool) {
 	finch.Debug("%v", r)
 
 	// GET or POST
@@ -460,24 +461,24 @@ func (a *API) remote(w http.ResponseWriter, r *http.Request, boot bool) (*remote
 	defer a.stage.Unlock()
 
 	// Is instance assigned to the current stage?
-	rc, ok := a.stage.remotes[name]
+	rc, ok := a.stage.clients[name]
 	if !ok {
 
 		// Instance not assigned to the stage, but that's ok if it's trying
 		// to boot and join the stage.
 		if get && boot {
-			finch.Debug("new remote")
-			rc = &remote{
+			finch.Debug("new client")
+			rc = &client{
 				name:  name,
 				state: ready,
 			}
-			// Do not add to stage.remotes; that's done in boot() if this remote
+			// Do not add to stage.clients; that's done in boot() if this client
 			// is assigned to the stage
-			return rc, get, true // success (new remote)
+			return rc, get, true // success (new client)
 		}
 
 		// Instance not assigned to stage and not booting, so it's out of sync
-		log.Printf("Unknown remote: %s", name)
+		log.Printf("Unknown client: %s", name)
 		w.WriteHeader(http.StatusGone) // reset
 		return nil, false, false
 	}

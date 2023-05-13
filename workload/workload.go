@@ -153,19 +153,15 @@ func (a *Allocator) Clients(groups [][]int, withStats bool) ([][]ClientGroup, er
 
 			var clientsIterPtr uint32
 
+			db, _, err := dbconn.Make() // stage already validated connection
+			if err != nil {
+				return nil, err
+			}
+			db.SetMaxOpenConns(int(nClients))
+			db.SetMaxIdleConns(int(nClients))
+
 			for k := uint(0); k < nClients; k++ { // client
 				runlevel.Client = k + 1
-
-				// Make a new sql.DB and sql.Conn for this client. Yes, sql.DB are meant
-				// to be shared, but this is a benchmark tool and each client is meant to be
-				// isolated. So we duplicate per client so there's zero chance of one client
-				// affecting another via a shared sql.DB. The connection to MySQL was already
-				// tested in compute/Instance.Boot, so these should not error.
-				db, _, err := dbconn.Make()
-				if err != nil {
-					return nil, err
-				}
-
 				c := &client.Client{
 					RunLevel:  *runlevel,  // copy
 					DB:        db,         // *sql.DB
@@ -200,7 +196,9 @@ func (a *Allocator) Clients(groups [][]int, withStats bool) ([][]ClientGroup, er
 				}
 				c.Statements = make([]*trx.Statement, n)
 				c.Data = make([]client.StatementData, n)
+				finch.Debug("%s", runlevel.ClientId())
 
+				runlevel.Trx = 0
 				n = 0
 				for trxNo, trxName := range cg.Trx {
 					runlevel.Trx += 1
@@ -253,7 +251,7 @@ func (a *Allocator) Clients(groups [][]int, withStats bool) ([][]ClientGroup, er
 
 						if stmt.Limit != nil {
 							clients[egNo][cgNo].DataLimit = true
-							finch.Debug("trx %s has data limit", trxName)
+							finch.Debug("    trx %s has data limit", trxName)
 						}
 
 						n++
