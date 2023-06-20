@@ -1,4 +1,4 @@
-baseURL = "https://square.github.io/finch/"
+baseURL = "/finch"
 title = "Finch Docs"
 theme = "hugo-geekdoc"
 languageCode = 'en-us'
