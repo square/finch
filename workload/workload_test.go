@@ -25,7 +25,7 @@ func TestGroups_SetupOne(t *testing.T) {
 			File: "../test/trx/001.sql",
 			Data: map[string]config.Data{
 				"id": {
-					Generator: "uint64-counter",
+					Generator: "auto-inc",
 				},
 			},
 		},
@@ -153,7 +153,7 @@ func TestGroups_SetupOne(t *testing.T) {
 		gotId := gotClients[0][0].Clients[0].Data[0].Inputs[0].Id()
 		expectId := data.Id{
 			RunLevel: r,
-			Type:     "uint64-counter",
+			Type:     "auto-inc",
 			DataKey:  "@id",
 			Scope:    "statement",
 			CopyNo:   1,
@@ -174,7 +174,7 @@ func TestGroups_PartialAlloc(t *testing.T) {
 			File: "../test/trx/001.sql",
 			Data: map[string]config.Data{
 				"id": {
-					Generator: "uint64-counter",
+					Generator: "auto-inc",
 				},
 			},
 		},

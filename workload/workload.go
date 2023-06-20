@@ -62,10 +62,12 @@ func (a *Allocator) Groups() ([][]int, error) {
 		}
 
 		hasDDL := a.hasDDL(a.Workload[i].Trx)
+
+		if hasDDL && finch.Uint(a.Workload[i].Iter) == 0 {
+			a.Workload[i].Iter = "1"
+		}
+
 		if a.Workload[i].Name != "" {
-			if hasDDL && finch.Uint(a.Workload[i].Iter) == 0 {
-				a.Workload[i].Iter = "1"
-			}
 			continue
 		}
 

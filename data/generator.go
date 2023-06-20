@@ -11,32 +11,20 @@ import (
 	"github.com/square/finch"
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-
-	Register("rand-int", f)
-	Register("int-range", f)
-	Register("auto-inc", f)
-	Register("uint64-counter", f)
-	Register("project-int", f)
-	Register("str-not-null", f)
-	Register("column", f)
-	Register("xid", f)
-}
-
-// Generator generates data values for a day key (@d).
+// Generator generates data values for a data key (@d).
 type Generator interface {
 	Format() string
 	Copy(finch.RunLevel) Generator
-	Values(ExecCount) []interface{}
+	Values(RunCount) []interface{}
 	Scan(any interface{}) error
 	Id() Id
 }
 
+// Id identifies the scope and copy number of a data key (@d).
 type Id struct {
 	finch.RunLevel
 	Scope   string // finch.SCOPE_*
-	Type    string // str-not-null
+	Type    string // str-az
 	DataKey string // @col
 	CopyNo  uint   // 1..N
 	copied  uint
@@ -61,6 +49,26 @@ func (id *Id) Copy(r finch.RunLevel) Id {
 	return cp
 }
 
+func init() {
+	rand.Seed(time.Now().UnixNano())
+	/*
+		Generator names here must match factory.Make switch cases below
+	*/
+	// Integer
+	Register("int", f)
+	Register("int-gaps", f)
+	Register("int-range", f)
+	Register("int-range-seq", f)
+	Register("auto-inc", f)
+	// String
+	Register("str-fill-az", f)
+	// ID
+	Register("xid", f)
+	// Column
+	Register("column", f)
+}
+
+// Factory makes data generators from day keys (@d).
 type Factory interface {
 	Make(name, dataName, scope string, params map[string]string) (Generator, error)
 }
@@ -70,6 +78,13 @@ type factory struct{}
 var f = &factory{}
 
 func (f factory) Make(name, dataName, scope string, params map[string]string) (Generator, error) {
+	switch scope {
+	case "", finch.SCOPE_STATEMENT, finch.SCOPE_TRX, finch.SCOPE_CLIENT:
+		// valid
+	default:
+		return nil, fmt.Errorf("%s: invalid data scope: %s; valid values: %s, %s, %s (default: %s)",
+			dataName, scope, finch.SCOPE_STATEMENT, finch.SCOPE_TRX, finch.SCOPE_CLIENT, finch.SCOPE_STATEMENT)
+	}
 	id := Id{
 		Scope:   scope,
 		Type:    name,
@@ -78,32 +93,28 @@ func (f factory) Make(name, dataName, scope string, params map[string]string) (G
 	var g Generator
 	var err error
 	switch name {
-	case "rand-int":
-		g, err = NewRandInt(id, params)
+	// Integer
+	case "int":
+		g, err = NewInt(id, params)
+	case "int-gaps":
+		g, err = NewIntGaps(id, params)
 	case "int-range":
 		g, err = NewIntRange(id, params)
-	case "int-sequence":
-		g, err = NewIntSequence(id, params)
-	case "uint64-counter":
-		g = NewIncUint64(id, params)
-	case "str-not-null":
-		s, ok := params["len"]
-		if !ok {
-			return nil, fmt.Errorf("str-not-null requires param len")
-		}
-		n, err := strconv.Atoi(s)
-		if err != nil {
-			return nil, err
-		}
-		g = NewStrNotNull(id, n)
-	case "column":
-		g = NewColumn(id, params)
+	case "int-range-seq":
+		g, err = NewIntRangeSeq(id, params)
+	case "auto-inc":
+		g, err = NewAutoInc(id, params)
+	// String
+	case "str-fill-az":
+		g, err = NewStrFillAz(id, params)
+	// ID
 	case "xid":
 		g = NewXid(id)
-	case "project-int":
-		g, err = NewProjectInt(id, params)
+	// Column
+	case "column":
+		g = NewColumn(id, params)
 	default:
-		return nil, fmt.Errorf("built-in data factory cannot make %s data generator", name)
+		err = fmt.Errorf("built-in data factory cannot make %s data generator", name)
 	}
 	if err != nil {
 		return nil, err

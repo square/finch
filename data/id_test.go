@@ -17,7 +17,7 @@ func TestXid_TrxScope(t *testing.T) {
 			DataKey: "@d",
 		}))
 
-	r := data.ExecCount{}
+	r := data.RunCount{}
 	r[data.TRX] = 1
 
 	v1 := g.Values(r)

@@ -3,12 +3,22 @@
 package data
 
 import (
+	"fmt"
 	"math/rand"
 	"strings"
 	"time"
 
 	"github.com/square/finch"
 )
+
+// StrFillAz implemnts the str-fill-az data generator.
+type StrFillAz struct {
+	id  Id
+	len int64
+	src rand.Source
+}
+
+var _ Generator = &StrFillAz{}
 
 // https://stackoverflow.com/questions/22892120/how-to-generate-a-random-string-of-a-fixed-length-in-go
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -18,39 +28,38 @@ const (
 	letterIdxMax  = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
 )
 
-type StrNotNull struct {
-	id  Id
-	n   int
-	src rand.Source
+func NewStrFillAz(id Id, params map[string]string) (*StrFillAz, error) {
+	g := &StrFillAz{
+		id:  id,
+		len: 100,
+		src: rand.NewSource(time.Now().UnixNano()),
+	}
+	if err := int64From(params, "len", &g.len, false); err != nil {
+		return nil, err
+	}
+	if g.len <= 0 {
+		return nil, fmt.Errorf("stra-az param len must be >= 1")
+	}
+	return g, nil
 }
 
-func NewStrNotNull(id Id, n int) *StrNotNull {
-	return &StrNotNull{
-		id:  id,
-		n:   n,
+func (g *StrFillAz) Id() Id                     { return g.id }
+func (g *StrFillAz) Format() string             { return "'%s'" }
+func (g *StrFillAz) Scan(any interface{}) error { return nil }
+
+func (g *StrFillAz) Copy(r finch.RunLevel) Generator {
+	return &StrFillAz{
+		id:  g.id.Copy(r),
+		len: g.len,
 		src: rand.NewSource(time.Now().UnixNano()),
 	}
 }
 
-var _ Generator = &StrNotNull{}
-
-func (g *StrNotNull) Id() Id {
-	return g.id
-}
-
-func (g *StrNotNull) Format() string {
-	return "'%s'"
-}
-
-func (g *StrNotNull) Copy(r finch.RunLevel) Generator {
-	return NewStrNotNull(g.id.Copy(r), g.n)
-}
-
-func (g *StrNotNull) Values(_ ExecCount) []interface{} {
+func (g *StrFillAz) Values(_ RunCount) []interface{} {
 	sb := strings.Builder{}
-	sb.Grow(g.n)
+	sb.Grow(int(g.len))
 	// A src.Int63() generates 63 random bits, enough for letterIdxMax characters!
-	for i, cache, remain := g.n-1, g.src.Int63(), letterIdxMax; i >= 0; {
+	for i, cache, remain := g.len-1, g.src.Int63(), letterIdxMax; i >= 0; {
 		if remain == 0 {
 			cache, remain = g.src.Int63(), letterIdxMax
 		}
@@ -62,8 +71,4 @@ func (g *StrNotNull) Values(_ ExecCount) []interface{} {
 		remain--
 	}
 	return []interface{}{sb.String()}
-}
-
-func (g StrNotNull) Scan(any interface{}) error {
-	return nil
 }

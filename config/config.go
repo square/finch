@@ -206,6 +206,7 @@ func Vars(s string, params map[string]string, numbers bool) (string, error) {
 					return "", fmt.Errorf("%s not defined (is it spelled correctly?)", p)
 				}
 				rep = append(rep, v[0], val)
+				finch.Debug("param: %s -> %v (user-defined)", s, rep)
 			case strings.HasPrefix(p, "sys."):
 				k := strings.TrimPrefix(p, "sys.")
 				val, ok := finch.SystemParams[k]
@@ -213,15 +214,16 @@ func Vars(s string, params map[string]string, numbers bool) (string, error) {
 					return "", fmt.Errorf("%s not defined (is it spelled correctly?)", p)
 				}
 				rep = append(rep, v[0], val)
+				finch.Debug("param: %s -> %v (built-in)", s, rep)
 			default:
 				val, ok := os.LookupEnv(p)
 				if !ok {
 					return "", fmt.Errorf("environment variable %s not set (is it spelled correctly?)", p)
 				}
 				rep = append(rep, v[0], val)
+				finch.Debug("param: %s -> %v (env var)", s, rep)
 			}
 		}
-		finch.Debug("var: %s -> %v", s, rep)
 		r := strings.NewReplacer(rep...)
 		s = r.Replace(s)
 	}

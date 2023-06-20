@@ -8,22 +8,6 @@ import (
 	"github.com/square/finch"
 )
 
-// ExecCount is an array of counters for each scope const below. Each Client
-// increments the counts as it executes. ScopedGenerator uses the counts to
-// determine when to call again the Generator that it wraps for new values in
-// the new scope.
-type ExecCount [5]uint
-
-// These const index ExecCount.
-const (
-	STAGE byte = iota
-	EXEC_GROUP
-	CLIENT_GROUP
-	ITER
-	TRX
-	//QUERY is not counted because every call to Values implies query += 1
-)
-
 // Key represents one data key (@d).
 type Key struct {
 	Name      string
@@ -112,22 +96,49 @@ func (s *Scope) Reset() {
 
 // --------------------------------------------------------------------------
 
+// RunCount is an array of ITER and TRX counters. Each Client increments the
+// counts as it executes. ScopedGenerator uses the counts to determine when to
+// call the real Generator that it wraps for new value.
+//
+// Statements are not counted because every call to Generator.Values is +1 statement.
+// Only trx and iter are counted because the other higher-level scopes haven't
+// been needed and it's not clear when they should increment.
+type RunCount [2]uint
+
+const (
+	ITER byte = iota
+	TRX
+	STATEMENT // not counted by needed for fast path in ScopedGenerator.Values.
+)
+
+var runlevelNumber = map[string]byte{
+	//finch.SCOPE_GLOBAL:       GLOBAL,
+	//finch.SCOPE_STAGE:        STAGE,
+	//finch.SCOPE_WORKLOAD:     WORKLOAD,
+	//finch.SCOPE_EXEC_GROUP:   EXEC_GROUP,
+	//finch.SCOPE_CLIENT_GROUP: CLIENT_GROUP,
+	finch.SCOPE_CLIENT:    ITER,
+	finch.SCOPE_TRX:       TRX,
+	finch.SCOPE_STATEMENT: STATEMENT,
+}
+
 // ScopedGenerator wraps a Generator to handle scopes higher that statement.
 // This prevents each generator from needing to be aware of or implement
 // scope-handling logic. Generators are wrapped automatically in factory.Make.
 type ScopedGenerator struct {
-	g     Generator     // real generator
-	s     string        //   its scope
-	vals  []interface{} //   its current value
-	trxNo uint          // last trx number for trx scope
+	g    Generator     // real generator
+	sno  byte          //   its scope (byte)
+	vals []interface{} //   its current value
+	last RunCount      //   last time was run
 }
 
 var _ Generator = &ScopedGenerator{}
 
 func NewScopedGenerator(g Generator) *ScopedGenerator {
 	return &ScopedGenerator{
-		g: g,
-		s: g.Id().Scope,
+		g:    g,
+		sno:  runlevelNumber[g.Id().Scope],
+		last: RunCount{},
 	}
 }
 
@@ -139,15 +150,12 @@ func (g *ScopedGenerator) Copy(r finch.RunLevel) Generator {
 	return NewScopedGenerator(g.g.Copy(r))
 }
 
-func (g *ScopedGenerator) Values(cnt ExecCount) []interface{} {
-	switch g.s {
-	// @todo implement other scopes
-	case finch.SCOPE_TRX:
-		if cnt[TRX] > g.trxNo { // new trx
-			g.trxNo = cnt[TRX]
-			g.vals = g.g.Values(cnt)
-		}
-	default: // QUERY
+func (g *ScopedGenerator) Values(cnt RunCount) []interface{} {
+	if g.sno == STATEMENT {
+		return g.g.Values(cnt) // fast path
+	}
+	if cnt[g.sno] > g.last[g.sno] { // trx or iter
+		g.last[g.sno] = cnt[g.sno]
 		g.vals = g.g.Values(cnt)
 	}
 	return g.vals

@@ -12,7 +12,7 @@ import (
 
 func TestScope_Trx(t *testing.T) {
 	keyName := "@d"
-	g := data.NewIncUint64(data.Id{Type: "inc-uint64", DataKey: keyName, Scope: finch.SCOPE_TRX}, nil)
+	g, _ := data.NewAutoInc(data.Id{Type: "auto-inc", DataKey: keyName, Scope: finch.SCOPE_TRX}, nil)
 
 	r := finch.RunLevel{
 		Stage:         1,
@@ -117,7 +117,7 @@ func TestScope_PREV(t *testing.T) {
 	// @PREV should return nil to signal "skip it; previous data gen will
 	// return multiple values."
 	keyName := "@d"
-	g := data.NewIncUint64(data.Id{Type: "inc-uint64", DataKey: keyName, Scope: finch.SCOPE_STATEMENT}, nil)
+	g, _ := data.NewAutoInc(data.Id{Type: "auto-inc", DataKey: keyName, Scope: finch.SCOPE_STATEMENT}, nil)
 	r := finch.RunLevel{}
 	scope := data.NewScope()
 	scope.Keys[keyName] = data.Key{

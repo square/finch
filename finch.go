@@ -23,6 +23,8 @@ const (
 	COPY_NUMBER = `/*!copy-number*/`
 
 	NOOP_COLUMN = "_"
+
+	ROWS = 100000
 )
 
 type RunLevel struct {
@@ -83,7 +85,7 @@ var MakeHTTPClient func() *http.Client = func() *http.Client {
 
 func Bool(s string) bool {
 	v := strings.ToLower(s)
-	return v == "true" || v == "yes" || v == "enable" || v == "enabled"
+	return v == "true" || v == "yes" || v == "on" || v == "aye"
 }
 
 func BoolString(b bool) string {

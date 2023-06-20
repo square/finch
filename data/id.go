@@ -8,6 +8,7 @@ import (
 	"github.com/square/finch"
 )
 
+// Xid implments the xid data generator.
 type Xid struct {
 	id  Id
 	val string
@@ -29,6 +30,6 @@ func (g *Xid) Copy(r finch.RunLevel) Generator {
 	return NewXid(g.id.Copy(r))
 }
 
-func (g *Xid) Values(c ExecCount) []interface{} {
+func (g *Xid) Values(c RunCount) []interface{} {
 	return []interface{}{xid.New().String()}
 }

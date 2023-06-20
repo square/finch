@@ -26,7 +26,7 @@ func NewCSV(opts map[string]string) (CSV, error) {
 	fileName := opts["file"]
 	if fileName == "" {
 		// Use a random temp file
-		f, err = os.CreateTemp("", fmt.Sprintf("finch-benchmark-%s", strings.ReplaceAll(time.Now().Format(time.Stamp), " ", "_")))
+		f, err = os.CreateTemp("", fmt.Sprintf("finch-benchmark-%s.csv", strings.ReplaceAll(time.Now().Format(time.Stamp), " ", "_")))
 	} else {
 		f, err = os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 	}

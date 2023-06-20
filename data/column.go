@@ -9,6 +9,7 @@ import (
 	"github.com/square/finch"
 )
 
+// Column implements the column data generator.
 type Column struct {
 	id     Id
 	params map[string]string
@@ -57,7 +58,7 @@ func (g *Column) Copy(r finch.RunLevel) Generator {
 	return NewColumn(g.id.Copy(r), g.params)
 }
 
-func (g *Column) Values(_ ExecCount) []interface{} {
+func (g *Column) Values(_ RunCount) []interface{} {
 	if g.insertId {
 		return []interface{}{g.rId}
 	}
@@ -119,7 +120,7 @@ func (g noop) Copy(r finch.RunLevel) Generator {
 	return g
 }
 
-func (g noop) Values(_ ExecCount) []interface{} {
+func (g noop) Values(_ RunCount) []interface{} {
 	return nil
 }
 

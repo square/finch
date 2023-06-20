@@ -174,10 +174,7 @@ func (c *Client) Run(ctxExec context.Context) {
 	var res sql.Result
 	var t time.Time
 
-	cnt := data.ExecCount{}
-	cnt[data.STAGE] = c.RunLevel.Stage
-	cnt[data.EXEC_GROUP] = c.RunLevel.ExecGroup
-	cnt[data.CLIENT_GROUP] = c.RunLevel.ClientGroup
+	rc := data.RunCount{}
 
 	// trxNo indexes into c.Stats and resets to 0 on each iteration. Remember:
 	// these are finch trx (files), not MySQL trx, so trx boundaries mark the
@@ -196,10 +193,10 @@ ITER:
 		if c.IterClients > 0 && atomic.AddUint32(c.IterClientsPtr, 1) > c.IterClients {
 			return
 		}
-		if c.Iter > 0 && cnt[data.ITER] == c.Iter {
+		if c.Iter > 0 && rc[data.ITER] == c.Iter {
 			return
 		}
-		cnt[data.ITER] += 1
+		rc[data.ITER] += 1
 		trxNo = -1
 
 		for i := range c.Statements {
@@ -213,7 +210,7 @@ ITER:
 			// a MySQL trx (either BEGIN or implicit). It marks finch trx scope
 			// "trx" is a trx file in the config assigned to this client.
 			if c.Data[i].TrxBoundary&trx.BEGIN == 1 {
-				cnt[data.TRX] += 1
+				rc[data.TRX] += 1
 				trxNo += 1
 			}
 
@@ -222,7 +219,7 @@ ITER:
 			// would start at [0:] each time
 			d := 0
 			for _, g := range c.Data[i].Inputs {
-				d += copy(c.values[i][d:], g.Values(cnt))
+				d += copy(c.values[i][d:], g.Values(rc))
 			}
 
 			// If BEGIN, check TPS rate limiter
