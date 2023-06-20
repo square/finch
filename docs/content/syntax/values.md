@@ -5,7 +5,7 @@ title: Values
 
 ## String-int
 
-In Finch [stage](../stage-file/) and [\_all.yaml](../all-files) files, most numerical values are YAML strings.
+In Finch [stage]({{< relref "syntax/stage-file" >}}) and [\_all.yaml]({{< relref "syntax/all-file" >}}) files, most numerical values are YAML strings.
 
 |String Value|Numerical Value|
 |------------|---------------|

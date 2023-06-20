@@ -72,22 +72,22 @@ The stage name.
 ### qps
 
 * Default: 0 (unlimited)
-* Value: [string-int](../values/#string-int) &ge; 0
+* Value: [string-int]({{< relref "syntax/values#string-int" >}}) &ge; 0
 
 Queries per second (QPS) limit for all clients, all execution groups.
 
 ### runtime
 
 * Default: 0 (unlimited)
-* Value: [time duration](../values/#time-duration) &ge; 0
+* Value: [time duration]({{< relref "syntax/values#time-duration" >}}) &ge; 0
 
 How long to run the stage.
-If zero and there are no [data limits](/data/limits), use CTRL-C to stop the stage and report stats.
+If zero and there are no [data limits]({{< relref "data/limits" >}}), use CTRL-C to stop the stage and report stats.
 
 ### tps
 
 * Default: 0 (unlimited)
-* Value: [string-int](../values/#string-int) &ge; 0
+* Value: [string-int]({{< relref "syntax/values#string-int" >}}) &ge; 0
 
 Transaction per second (TPS) limit for all clients, all execution groups.
 
@@ -105,7 +105,7 @@ If true, the local Finch instances does not count as 1 compute.
 ### instances
 
 * Default: 1
-* Value: [string-int](../values/#string-int) &ge; 0
+* Value: [string-int]({{< relref "syntax/values#string-int" >}}) &ge; 0
 
 The number of compute instances that Finch requires to run the benchmark.
 
@@ -113,26 +113,26 @@ The number of compute instances that Finch requires to run the benchmark.
 
 ## mysql
 
-See [`mysql` in _all.yaml_](../all-file/#mysql).
+See [`mysql` in _all.yaml_]({{< relref "syntax/all-file#mysql" >}}).
 
 ---
 
 ## params
 
-See [`params` in _all.yaml_](../all-file/#params).
+See [`params` in _all.yaml_]({{< relref "syntax/all-file#params" >}}).
 
 ---
 
 ## stats
 
-See [`statas` in _all.yaml_](../all-file/#stats).
+See [`stats` in _all.yaml_]({{< relref "syntax/all-file#stats" >}}).
 
 
 ---
 
 ## trx
 
-The `trx` section is a required _list_ of Finch [trx files](../trx-file/) to load.
+The `trx` section is a required _list_ of Finch [trx files]({{< relref "syntax/trx-file" >}}) to load.
 
 ```yaml
 stage:
@@ -157,7 +157,7 @@ Paths are relative to the directory of the stage file.
 * Default: (none; must be set explicitly)
 * Value: map keyed on data key name without `@` prefix
 
-Every [data key](/data/keys/) in a trx file must be defined in the stage file.
+Every [data key]({{< relref "data/keys" >}}) in a trx file must be defined in the stage file.
 
 ```yaml
 stage:
@@ -187,7 +187,7 @@ Indicates column type: "n" for a numeric value, or "s" for a string (quoted) val
 #### d.generator
 
 * Default: (none; must be set explicitly)
-* Type: name of [data generator](/data/generators/)
+* Type: name of [data generator]({{< relref "data/generators" >}})
 
 Name of the data generator to use for the data key.
 
@@ -198,7 +198,7 @@ Name of the data generator to use for the data key.
 
 Generator-specific params.
 These are optional but usually needed.
-See [Data / Generators](/data/generators/)
+See [Data / Generators]({{< relref "data/generators" >}})
 
 #### d.scope
 
@@ -207,7 +207,7 @@ See [Data / Generators](/data/generators/)
 
 Scope of data generator.
 If not specified (empty string), the default is "statement".
-See [Data / Scope](/data/scope/).
+See [Data / Scope]({{< relref "data/scope" >}}).
 
 ### name
 
@@ -218,12 +218,12 @@ Set trx name used in [`workload.trx`](#trx-1) list.
 
 ## workload
 
-The `workload` section declares the [workload](/benchmark/workload) that references the [`trx`](#trx) section.
+The `workload` section declares the [workload]({{< relref "benchmark/workload" >}}) that references the [`trx`](#trx) section.
 
 ### clients
 
 * Default: 1
-* Value: [string-int](../values/#string-int) &ge; 1
+* Value: [string-int]({{< relref "syntax/values#string-int" >}}) &ge; 1
 
 Number of clients to run in client group.
 
@@ -234,7 +234,7 @@ Number of clients to run in client group.
 ### iter-exec-group
 
 * Default: 0 (unlimited)
-* Value: [string-int](../values/#string-int) &ge; 1
+* Value: [string-int]({{< relref "syntax/values#string-int" >}}) &ge; 1
 
 Maximum number of iterations to execute per client, client group, or execution group (respectively).
 
@@ -245,14 +245,14 @@ Maximum number of iterations to execute per client, client group, or execution g
 ### qps-exec-group
 
 * Default: 0 (unlimited)
-* Value: [string-int](../values/#string-int) &ge; 1
+* Value: [string-int]({{< relref "syntax/values#string-int" >}}) &ge; 1
 
 Maximum rate of queries per second (QPS) per client, client group, or execution group (respectively).
 
 ### runtime
 
 * Default: 0 (forever)
-* Value: [string-int](../values/#string-int) &ge; 1
+* Value: [string-int]({{< relref "syntax/values#string-int" >}}) &ge; 1
 
 Runtime limit
 
@@ -263,7 +263,7 @@ Runtime limit
 ### tps-exec-group
 
 * Default: 0 (unlimited)
-* Value: [string-int](../values/#string-int) &ge; 1
+* Value: [string-int]({{< relref "syntax/values#string-int" >}}) &ge; 1
 
 Maximum rate of transaction per second (TPS) per client, client group, or execution group (respectively).
 

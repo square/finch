@@ -168,7 +168,7 @@ Lines 15&ndash;18 declare the Finch trx that compose the stage.
 (Usually this section is longer, more complex.)
 
 This is only an example to demonstrate how Finch trx should be used to model real application transactions.
-[Benchmark / Workload](../workload/) explains how to configure the `workload` section.
+[Benchmark / Workload]({{< relref "benchmark/workload" >}}) explains how to configure the `workload` section.
 
 ## TPS
 

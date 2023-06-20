@@ -8,7 +8,7 @@ There are three types of parameters: user-defined, built-in, and environment var
 
 ## User-defined
 
-User-defined parameters are defined in [\_all.yaml](/syntax/all-file/#params), and [stage files](/syntax/stage-file/), and by [`--param`](/command-line/usage/#--param) on the command line.
+User-defined parameters are defined in [\_all.yaml]({{< relref "syntax/all-file#params" >}}), and [stage files]({{< relref "syntax/stage-file" >}}), and by [`--param`]({{< relref "command-line/usage#--param" >}}) on the command line.
 
 ```yaml
 params:
@@ -61,10 +61,10 @@ clients = 16
 ```
 {{< /columns >}}
 
-[`--param`](/command-line/usage/#--param) on the command line overrides all and sets the final value.
+[`--param`]({{< relref "command-line/usage#--param" >}}) on the command line overrides all and sets the final value.
 
 Reusing the example above, `--params rows=999` overrides both \_all.yaml and the stage file, setting final value rows = 999.
 
 {{< hint type=tip >}}
-Look for "param:" in the [`--debug`](/command-line/usage/#--debug) output to debug parameters processing.
+Look for "param:" in the [`--debug`]({{< relref "command-line/usage#--debug" >}}) output to debug parameters processing.
 {{< /hint >}}

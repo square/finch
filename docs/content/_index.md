@@ -31,12 +31,12 @@ This allows developers (and DBAs) to write benchmarks easily&mdash;without knowi
 
 Normal benchmark tools execute all transactions, in all clients, all at once.
 
-![Normal workload execution](/img/normal_benchmark_workload.svg)
+![Normal workload execution](/finch/img/normal_benchmark_workload.svg)
 
 But real workloads (the combination of queries, data, and access patterns) can be far more complex.
 Finch lets you orchestrate complex workloads.
 
-![Finch workload shaping](/img/finch_benchmark_workload.svg)
+![Finch workload shaping](/finch/img/finch_benchmark_workload.svg)
 
 In the diagram above, clients in client group 1 execute statements in transaction 3 while, concurrently, clients in client group 2 execute statements in transaction 2.
 Together, these client groups form execution group 1.
@@ -49,7 +49,7 @@ Whether your benchmark workload is simple or complex, Finch can execute it.
 
 A single Finch server can coordinate multiple Finch clients running on separate compute instances.
 
-![Finch Distributed Compute](/img/finch_compute.svg)
+![Finch Distributed Compute](/finch/img/finch_compute.svg)
 
 This allows you to hammer the database like the application: from any number of compute instances.
 It's a benchmarking bot network&mdash;wield the power responsibly.
@@ -64,5 +64,5 @@ Finch doesn't judge; it just works hard.
 ---
 
 {{< hint type=tip title="Read Next" >}}
-[Start Here](/intro/start-here) to learn Finch by writing quick and simple benchmarks.
+[Start Here]({{< relref "intro/start-here" >}}) to learn Finch by writing quick and simple benchmarks.
 {{< /hint >}}

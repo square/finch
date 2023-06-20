@@ -98,7 +98,7 @@ Remember the example in the table above because it's reused in the following sec
 {{< /hint >}}
 
 Finch also collects and reports statistics per-trx.
-(The built-in stats reports combine all trx stats, but a [stats plugin](/api/stats/) receives per-trx stats.)
+(The built-in stats reports combine all trx stats, but a [stats plugin]({{< relref "api/stats" >}}) receives per-trx stats.)
 
 You can write a benchmark as one large pseudo-transaction (all SQL statements in one file), but for various reasons that will become clear later, it's better to write each SQL transaction in a separate Finch trx file.
 
@@ -164,7 +164,7 @@ And execution groups are run top to bottom in workload order.
 
 Visually, the workload processing (Y axis) and time when the execution groups are run (X axis) can be depicted like:
 
-![Finch Execution Group](/img/finch_exec_group.svg)
+![Finch Execution Group](/finch/img/finch_exec_group.svg)
 
 Both client groups in execution group `FOO` (blue) run first.
 When they're done, the client group in execution group `BAR` runs next.
@@ -252,7 +252,7 @@ finch benchmark.yaml
 The global run level represents one running instances of Finch (all stages) on a compute instance.
 What's unique about Finch is that one instance (a server) can coordinate running the stages on other instances (clients):
 
-![Finch Distributed Compute](/img/finch_compute.svg)
+![Finch Distributed Compute](/finch/img/finch_compute.svg)
 
 This is optional, but it's easy to enable and useful for creating a massive load on a MySQL instance with several smaller and cheaper compute instances rather than one huge benchmark server.
 
@@ -318,7 +318,7 @@ In the stage file, `stage.trx[].data.d.generator` configures the type of data ge
 And `stage.trx[].data.d.params` provides generator-specific configuration; in this case, configuring the `int` generator to return a uniform random distribution of numbers between 1 and 25,000.
 When Finch clients execute the `SELECT` statement above, data key `@d` will be replaced with random values from this `int` data generator.
 
-Finch ships with [built-in data generators](/data/generators/), and it's easy [build your own](/api/data/) data generator.
+Finch ships with [built-in data generators]({{< relref "data/generators" >}}), and it's easy [build your own]({{< relref "api/data" >}}) data generator.
 
 ### Scope
 

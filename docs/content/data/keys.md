@@ -4,9 +4,9 @@ weight: 1
 
 _Data keys_ are placeholders in SQL statements, like "@d", that are replaced with real values when executed by a client.
 
-![Finch data key and generator](/img/finch_data_key.svg)
+![Finch data key and generator](/finch/img/finch_data_key.svg)
 
-Data keys are used in [trx files](/syntax/trx-file/), configured in [stage files](/syntax/stage-file/), and are replaced at runtime when executed by a client.
+Data keys are used in [trx files]({{< relref "syntax/trx-file" >}}), configured in [stage files]({{< relref "syntax/stage-file" >}}), and are replaced at runtime when executed by a client.
 
 {{< toc >}}
 
@@ -37,7 +37,7 @@ Examples in these docs use the canonical data key (@d) and other short names, bu
 SELECT c FROM t WHERE id = @id AND n > @n AND @k IS NOT NULL
 ```
 
-Data keys are configured in [`stage.trx.[].data`](/syntax/stage-file/#data): each data key must have a corresponding entry in that map.
+Data keys are configured in [`stage.trx[].data`]({{< relref "syntax/stage-file#data" >}}): each data key must have a corresponding entry in that map.
 Since "@" is a special character in YAML, the data key names in a stage file do _not_ have the "@" prefix:
 
 ```yaml
@@ -55,9 +55,9 @@ stage:
           generator: int
 ```
 
-The only required configuration is `generator`: the name of a [data generator](../generators/) to use for the data key.
+The only required configuration is `generator`: the name of a [data generator]({{< relref "data/generators" >}}) to use for the data key.
 But you most likely need to specify generator-specific parameters, as shown above for "id".
-See [`stage.trx.[].data`](/syntax/stage-file/#data) for the full configuration.
+See [`stage.trx[].data`]({{< relref "syntax/stage-file#data" >}}) for the full configuration.
 
 {{< hint type=note title="Terminology" >}}
 The terms "data key" and "data generator" are used interchangeably because they're two sides of the same coin.
@@ -77,15 +77,15 @@ UPDATE t SET n=n+1 WHERE id = @id
 This works because the default data scope is statement: Finch creates one data generator for @id in the `SELECT`, and another for @id in the `UPDATE`.
 However, there are two important points to consider:
 
-* @id in both statments will have the same configuration because they'll be the same map key ("id") in [`stage.trx.[].data`](/syntax/stage-file/#data)&mdash;same name, same configuration.
-* _[Data scope](../scope/)_ determines if the two @id are different or the same, and "when": if they're different, when do they generate differnet values?
+* @id in both statements will have the same configuration because they'll be the same map key ("id") in [`stage.trx[].data`]({{< relref "syntax/stage-file#data" >}})&mdash;same name, same configuration.
+* _[Data scope]({{< relref "data/scope" >}})_ determines if the two @id are different or the same, and "when": if they're different, when do they generate different values?
 
 {{< hint type=warning title="Data Scope" >}}
-Be sure to read [Data / Scope](../scope/) to fully understand the second point.
+Be sure to read [Data / Scope]({{< relref "data/scope" >}}) to fully understand the second point.
 {{< /hint >}}
 
-The second point&mdash;[data scope](../scope/)&mdash;is impotant because, in that trx, it looks like the two statements are supposed to access the same row (read the row, then update it).
-If that's true, then the default statememnt data scope won't do what you want.
+The second point&mdash;[data scope]({{< relref "data/scope" >}})&mdash;is important because, in that trx, it looks like the two statements are supposed to access the same row (read the row, then update it).
+If that's true, then the default statement data scope won't do what you want.
 Instead, you need to make @id the _same_ in both statements by giving it trx scope:
 
 ```yaml
@@ -120,5 +120,5 @@ stage:
           generator: int-range
 ```
 
-The [int-range generator](/data/generators/#int-range) returns two values (an ordered pair): the first value repalced @d, the second value replaces @PREV.
+The [int-range generator]({{< relref "data/generators#int-range" >}}) returns two values (an ordered pair): the first value repalced @d, the second value replaces @PREV.
 

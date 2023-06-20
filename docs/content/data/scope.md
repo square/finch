@@ -2,7 +2,7 @@
 weight: 2
 ---
 
-Data keys are scoped to the Finch [run levels](/intro/concepts/#run-levels):
+Data keys are scoped to the Finch [run levels]({{< relref "intro/concepts#run-levels" >}}):
 
 ```
 global
@@ -30,14 +30,14 @@ To help explain (and for brevity), let's use the same notation that Finch uses i
 So "@d(1)/trx" is @d, first copy of the generator, trx-scoped.
 
 {{< hint type=tip title="Debug Output" >}}
-Normal Finch output doesn't print data IDs, but you can see them with [`--debug`](/command-line/usage/#--debug).
+Normal Finch output doesn't print data IDs, but you can see them with [`--debug`]({{< relref "command-line/usage#--debug" >}}).
 {{< /hint >}}
 
 {{< toc >}}
 
 ## Statement
 
-Suppose you have the same trx (with two pseudo-SQL statements for brevity) being executed by 2 clients in the same [client/execution group](/intro/concepts/#client-and-execution-groups):
+Suppose you have the same trx (with two pseudo-SQL statements for brevity) being executed by 2 clients in the same [client/execution group]({{< relref "intro/concepts#client-and-execution-groups" >}}):
 
 {{< columns >}}
 _Client 1_
@@ -69,7 +69,7 @@ Ignore client scope for the moment; we'll come back to it.
 
 With statement scope, @d is unique in each statement, evidenced by the copy numbers: "(1)", "(2)", "(3)", and "(4)".
 Those mean Finch instantiated four different copies of the data generator.
-All four have the same configuration (see [Data / Keys / Duplicates](../keys/#duplicates)), but they are unique and separate instances of the generator, like:
+All four have the same configuration (see [Data / Keys / Duplicates]({{< relref "data/keys#duplicates" >}})), but they are unique and separate instances of the generator, like:
 
 ```go
 d1 := NewGenerator(config)
@@ -102,7 +102,7 @@ The same happens for client 2.
 Trx scope is aptly named because it's how you can "share" (or "sync") generated data in the same trx.
 
 {{< hint type=note >}}
-Remember that "trx" in these docs refers to a [Finch trx](/benchmark/trx/), not a MySQL transaction, although the two are closely related.
+Remember that "trx" in these docs refers to a [Finch trx]({{< relref "benchmark/trx" >}}), not a MySQL transaction, although the two are closely related.
 {{< /hint >}}
 
 What happens if @d appears in more than one trx for the _same client_?
@@ -140,8 +140,8 @@ The example immediately above&mdash;client 1 with trx A and B&mdash;explains why
 
 With client scope, @d in trx B is the same as @d in trx A, as evidenced by the same data ID: @d(1)/trx.
 
-That answers "1. Where is @d unique?", and the answer to "2. When does @d return a new value?" is: on each [iteration](/benchmark/workload/#iterations).
-For data scope, "client" and "iter" are synonymous because the main loop of a client iterates through all its [assigned trx](/benchmark/workload/#trx).
+That answers "1. Where is @d unique?", and the answer to "2. When does @d return a new value?" is: on each [iteration]({{< relref "benchmark/workload#iterations" >}}).
+For data scope, "client" and "iter" are synonymous because the main loop of a client iterates through all its [assigned trx]({{< relref "benchmark/workload#trx" >}}).
 
 ## Higher Scopes
 
@@ -165,7 +165,7 @@ For now, statement, trx, and client (iter) scope are sufficient to orchestrate c
 
 ## Configure
 
-Specify [`stage.trx.[].data.d.scope`](/syntax/stage-file/#dscope) for each data key:
+Specify [`stage.trx[].data.d.scope`]({{< relref "syntax/stage-file#dscope" >}}) for each data key:
 
 ```yaml
 stage:

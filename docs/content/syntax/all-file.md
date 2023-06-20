@@ -9,7 +9,7 @@ It's like a MySQL defaults file (my.cnf): it provides a default configuration th
 \_all.yaml is _not_ a stage file.
 There is no top-level `stage` section.
 The only valid top-level sections in \_all.yaml are `mysql`, `parameters`, and `stats`.
-These three sections can be specified in a [stage file](/syntax/stage-file/) to override \_all.yaml.
+These three sections can be specified in a [stage file]({{< relref "syntax/stage-file" >}}) to override \_all.yaml.
 
 This is a quick reference with fake but syntactically valid values:
 
@@ -81,7 +81,7 @@ MySQL socket.
 
 ### timeout-connect
 * Default: 10s
-* Value: [time duration](../values/#time-duration) &ge; 0
+* Value: [time duration]({{< relref "syntax/values#time-duration" >}}) &ge; 0
 
 Timeout on connecting to MySQL.
 
@@ -94,14 +94,14 @@ MySQL username
 ## params
 
 The `params` section is an optional key-value map of strings.
-See [Intro / Concepts / Parameters](/intro/concepts/#parameters) and [Syntax / Params](/syntax/params/).
+See [Intro / Concepts / Parameters]({{< relref "intro/concepts#parameters" >}}) and [Syntax / Params]({{< relref "syntax/params" >}}).
 
 ---
 
 ## stats
 
 The `stats` section configure statistics collection and reporting.
-By default, Finch prints [statistics](/benchmark/statistics/) once, to stdout, when the stage completes. 
+By default, Finch prints [statistics]({{< relref "benchmark/statistics" >}}) once, to stdout, when the stage completes. 
 Different reporters can be used at the same time, but only one instance of each reporter.
 
 ### disable
@@ -110,7 +110,7 @@ Different reporters can be used at the same time, but only one instance of each 
 * Value: boolean
 
 Disable stats.
-For example, you can enable and configure stats once in \_all.yaml for all stages, but disalbe stats in a [DDL stage](/benchmark/overview/#ddl) by specifying:
+For example, you can enable and configure stats once in \_all.yaml for all stages, but disable stats in a [DDL stage]({{< relref "benchmark/overview#ddl" >}}) by specifying:
 
 ```yaml
 # DDL stage
@@ -122,17 +122,17 @@ stage:
 ### freq
 
 * Default: 0 (disabled)
-* Value: [time duration](../values/#time-duration) &ge; 0
+* Value: [time duration]({{< relref "syntax/values#time-duration" >}}) &ge; 0
 
 How frequently to report periodic stats for all reporters.
 (Frequency per reporter is not supported.)
 If disabled, only one final report is printed at the end of the stage.
 
-See [Benchmark / Statistics / Frequency](/benchmark/statistics/#frequency).
+See [Benchmark / Statistics / Frequency]({{< relref "benchmark/statistics#frequency" >}}).
 
 ### report
 
-The `report` section is a map keyed on reporter name ([built-in](/benchmark/statistics/#reporters) and [custom](/api/stats)).
+The `report` section is a map keyed on reporter name ([built-in]({{< relref "benchmark/statistics#reporters" >}}) and [custom]({{< relref "api/stats" >}})).
 The value of each map is a key-value map of reporter-specific parameters.
 
 ```yaml
@@ -144,4 +144,4 @@ stats:
       percentiles: "P999"
 ```
 
-See [Benchmark / Statistics / Reporters](/benchmark/statistics/#reporters) for `stdout` and `cvs` parameters.
+See [Benchmark / Statistics / Reporters]({{< relref "benchmark/statistics#reporters" >}}) for `stdout` and `cvs` parameters.

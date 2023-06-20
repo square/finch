@@ -258,6 +258,6 @@ Scroll right (&rarr;) and notice `TPS 2,365`: Finch measures transactions per se
 ---
 
 {{< hint type=tip title="Read Next" >}}
-Learn the [Concepts](/intro/concepts) underlying these benchmarks and how Finch works.
+Learn the [Concepts]({{< relref "intro/concepts" >}}) underlying these benchmarks and how Finch works.
 {{< /hint >}}
 

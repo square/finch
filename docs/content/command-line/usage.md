@@ -19,7 +19,7 @@ Options:
 finch 1.0.0
 ```
 
-You must specify at least one [stage file](/syntax/stage-file) on the commnand line.
+You must specify at least one [stage file]({{< relref "syntax/stage-file" >}}) on the command line.
 
 Finch executes stages files in the order given.
 
@@ -27,7 +27,7 @@ Finch executes stages files in the order given.
 
 ### `--bind`
 
-[Server](../client-server) addr:port to listen on for clients
+[Server]({{< relref "command-line/client-server" >}}) addr:port to listen on for clients
 {.tagline}
 
 |Env Var|Default|Valid Value (n)|
@@ -51,7 +51,7 @@ Print debug output to stderr.
 |`FINCH_BIND`|:33075|ADDR[:PORT]|
 {.compact .params}
 
-Use with `--test` to debug startup validation, data geneartors, etc.
+Use with `--test` to debug startup validation, data generators, etc.
 
 <br>
 
@@ -65,7 +65,7 @@ Use with `--test` to debug startup validation, data geneartors, etc.
 |`FINCH_DSN`||(See link below)|
 {.compact .params}
 
-This overrides any [`mysql`](/syntax/all-file/#mysql) settings.
+This overrides any [`mysql`]({{< relref "syntax/all-file#mysql" >}}) settings.
 
 <br>
 
@@ -78,7 +78,7 @@ Print help (the usage output above) and exit zero
 
 ### `--param`
 
-Set [params](/syntax/all-file/#params) that override all stage files
+Set [params]({{< relref "syntax/all-file#params" >}}) that override all stage files
 {.tagline}
 
 This option can be specified multiple times:
@@ -91,7 +91,7 @@ finch --params key1=value1 --params key2=val2
 
 ### `--server`
 
-Run Finch as a [client](../client-server/) connected to address and (optional) port
+Run Finch as a [client]({{< relref "command-line/client-server" >}}) connected to address and (optional) port
 {.tagline}
 
 |Env Var|Default|Valid Value (n)|

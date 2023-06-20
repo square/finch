@@ -23,7 +23,7 @@ Under the hood, it's the sysbench write-only benchmark with a specific workload:
 
 ## intro
 
-[Intro / Start Here](/intro/start-here/) benchmarks
+[Intro / Start Here]({{< relref "intro/start-here" >}}) benchmarks
 {.tagline}
 
 |Stage|Type|Description|

@@ -29,7 +29,7 @@ weight: 5
 
 ## Percentiles
 
-The default percentile is P999 (99.9th), but [built-in reporters](#reports) support a variable list of percentiles.
+The default percentile is P999 (99.9th), but [built-in reporters](#reporters) support a variable list of percentiles.
 For example, if a built-in reporter is configured for "P95,P99,P999", then it will report 3 percentiles for each breakdown: all queries, read queries (`SELECT`), write queries, and `COMMIT`.
 
 Percentiles are calculated using the same [MySQL 8.0 histogram buckets](https://dev.mysql.com/doc/mysql-perfschema-excerpt/8.0/en/performance-schema-statement-histogram-summary-tables.html): 450 buckets increasing by roughly 4.7%.
@@ -61,7 +61,7 @@ For example, trx C in the diagram below is a single `SELECT` statement, so its w
 
 If the compute instance is a client, it sends its trx stats to the server, and the server aggregates all trx stats from all instances.
 
-![Finch stats combines](/img/finch_stats_combined.svg)
+![Finch stats combines](/finch/img/finch_stats_combined.svg)
 
 By default, the [built-in reporters](#reports) also aggregate all trx stats for reporting.
 As shown in the diagram above, the trx stats for A, B, and C are combined and reported as one set of stats per compute.
@@ -72,15 +72,15 @@ Also, the [stdout report](#stdout) reports both per-compute stats and all comput
 [Percentiles](#percentiles) are aggregated properly by combining bucket counts.
 {{< /hint >}}
 
-The combined compute stats are what is typically expected as benchmark stats, but with a [custom reporter](/api/stats/) it's possible to report stats per compute, per trx.
+The combined compute stats are what is typically expected as benchmark stats, but with a [custom reporter]({{< relref "api/stats" >}}) it's possible to report stats per compute, per trx.
 
 ## Frequency
 
 By default, Finch reports stats when the stage completes.
-(See [Benchmark / Workload / Runtime Limits](/benchmark/workload/#runtime-limits).)
+(See [Benchmark / Workload / Runtime Limits]({{< relref "benchmark/workload#runtime-limits" >}}).)
 This implies 1 interval equal to the entire runtime (duration = runtime in the stats).
 
-Set [`stats.freq`](/syntax/all-file/#freq) to enable periodic stats.
+Set [`stats.freq`]({{< relref "syntax/all-file#freq" >}}) to enable periodic stats.
 For example, if set to "5s", Finch will report stats at 5 second intervals.
 Stats are reset each interval; they're not averaged or carried over.
 For example, r_max for each interval is the maximum `SELECT` response time for that interval.
@@ -91,15 +91,15 @@ Use periodic stats and the [CSV reporter](#csv) to graph results with an externa
 
 ## Reporters
 
-Reports are configured in [`stats.report`](/syntax/all-file/#report).
+Reports are configured in [`stats.report`]({{< relref "syntax/all-file#report" >}}).
 Different reporters can be used at the same time, but only one instance of each reporter.
 
 ### stdout
 
 |Param|Default|Valid|
 |-----|-------|-----|
-|combined|yes|[string-bool](/syntax/values/#string-bool)|
-|each-instance|no|[string-bool](/syntax/values/#string-bool)|
+|combined|yes|[string-bool]({{< relref "syntax/values#string-bool" >}})|
+|each-instance|no|[string-bool]({{< relref "syntax/values#string-bool" >}})|
 |percentiles|P999|Comma-spearted Pn values where 1 &ge; n &le; 100|
 {.compact .params}
 
@@ -110,7 +110,7 @@ The stdout reporter dumps stats to stdout in a table:
         1|       20|      20|       4| 9,461|  80| 1,659| 79,518| 2,365|   148|  1,096| 37,598| 2,365|   184|  1,202| 40,770| 2,365|   366|  2,398| 79,518|      0|local
 ```
 
-This is the default reporter and output if no [`stats`](/syntax/all-file/#stats) are configured.
+This is the default reporter and output if no [`stats`]({{< relref "syntax/all-file#stats" >}}) are configured.
 
 ### csv
 
@@ -121,7 +121,7 @@ This is the default reporter and output if no [`stats`](/syntax/all-file/#stats)
 {.compact .params}
 
 The csv reporter writes all stats in CSV format to the specified file.
-This is used for graphing stats with an external tool when combined with periodic stats: [`stats.freq`](/syntax/all-file/#freq) &gt; 0.
+This is used for graphing stats with an external tool when combined with periodic stats: [`stats.freq`]({{< relref "syntax/all-file#freq" >}}) &gt; 0.
 Plot runtime on the X axis and other stats on the Y axis (QPS, TPS, and so forth).
 
 The default file is temp file with "TIMESTAMP" replaced by the current timestamp.

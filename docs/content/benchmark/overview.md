@@ -9,7 +9,7 @@ A Finch benchmark is defined, configured, and run by one or more stage.
 You write (and name) the stages you need for a benchmark.
 
 {{< hint type=note >}}
-This page presumes and requires familiarity with Finch [concepts](/intro/concepts).
+This page presumes and requires familiarity with Finch [concepts]({{< relref "intro/concepts" >}}).
 {{< /hint >}}
 
 {{< toc >}}
@@ -88,7 +88,7 @@ First, this minimally-configured stage relies on Finch auto-detecting the DDL an
 
 Second, the `CREATE TABLE` must execute only once, but the `INSERT` needs to execute one millions times.
 (Terribly inefficient, but it's just an example.)
-The `-- rows: 1,000,000` is a [data limit](/data/limits/), and it applies to the Finch trx where it appears, not to the statement.
+The `-- rows: 1,000,000` is a [data limit]({{< relref "data/limits" >}}), and it applies to the Finch trx where it appears, not to the statement.
 Intuitively, yes, it should apply only to the statement, but for internal code efficiency reasons it doesn't yet work this way; it applies to the whole trx.
 As such, the `INSERT` must be specified in a separate Fix trx file.
 But presuming the `INSERT` statement can be executed in parallel, a separate trx file makes it possible to insert in parallel with multiple clients by configuring the workload:
@@ -107,7 +107,7 @@ stage:
 By adding a `stage.workload` section, you tell Finch how to run each trx.
 In this case, Finch will execute `schema.sql` once with one client; then it will execute `rows.sql` with 16 clients until 1,000,000 rows have been inserted.
 
-This simple example works, but [Benchmark / Examples](../examples/#ddl) shows better methods and explains some magic happening behind the scenes.
+This simple example works, but [Benchmark / Examples]({{< relref "benchmark/examples" >}}) shows better methods and explains some magic happening behind the scenes.
 
 ### Standard
 
@@ -117,7 +117,7 @@ This is what engineers think of and expect from a standard database benchmark:
 3. Execute queries
 4. Report query stats
 
-Finch handles the [stats](../statistics/), so your focus is queries and how to execute them (the workload).
+Finch handles the [stats]({{< relref "benchmark/statistics" >}}), so your focus is queries and how to execute them (the workload).
 
 #### Queries
 
@@ -136,9 +136,9 @@ The point is: they're real SQL statements; no special benchmark scripting langua
 
 Since you probably already know SQL, you can spend time learning:
 
-1. How and why to model transactions in Finch: [Benchmark / Trx](../trx/)
-1. The very simple Finch trx file syntax: [Syntax / Trx File](/syntax/trx-file)
-1. How to use data generators (`@d`): [Data / Generators](/data/generators/)
+1. How and why to model transactions in Finch: [Benchmark / Trx]({{< relref "benchmark/trx" >}})
+1. The very simple Finch trx file syntax: [Syntax / Trx File]({{< relref "syntax/trx-file" >}})
+1. How to use data generators (`@d`): [Data / Generators]({{< relref "data/generators" >}})
 
 The first two are trivial&mdash;learn once and done.
 Data generators can be simple or complex depending on your benchmark.
@@ -147,7 +147,7 @@ Data generators can be simple or complex depending on your benchmark.
 
 Queries are inert until executed, and that's what the workload does: declare how to execute the queries (SQL statements written in Finch trx files).
 Like data generators, the workload can be simple or complex depending on your benchmark.
-Consequently, there's a whole page just for workload: [Benchmark / Workload](../workload/).
+Consequently, there's a whole page just for workload: [Benchmark / Workload]({{< relref "benchmark/workload" >}}).
 
 ## Other Stages
 
@@ -169,4 +169,4 @@ finch setup.yaml benchmark.yaml cleanup.yaml
 
 That runs stage `setup.yaml`, then stage `benchmark.yaml`, then stage `cleanup.yaml`.
 
-This isn't required, but it's a useful if your benchmark uses [data generators](/data/generators/) with global scope to share data across stages.
+This isn't required, but it's a useful if your benchmark uses [data generators]({{< relref "data/generators" >}}) with global scope to share data across stages.

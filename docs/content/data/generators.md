@@ -101,7 +101,7 @@ Returns [rs/xid](https://github.com/rs/xid) values as strings.
 
 ## Column
 
-The `column` generator is used for [`--save-insert-id`](/syntax/trx-file/#save-insert-id) and [`--save-result`](syntax/trx-file/#save-result)
+The `column` generator is used for [`--save-insert-id`]({{< relref "syntax/trx-file#save-insert-id" >}}) and [`--save-result`]({{< relref "syntax/trx-file#save-result" >}})
 {.tagline}
 
 

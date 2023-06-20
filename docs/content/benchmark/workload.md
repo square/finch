@@ -2,17 +2,17 @@
 weight: 4
 ---
 
-The [`stage.workload`](/syntax/stage-file/#workload) section determines how and when Finch executes transactions.
+The [`stage.workload`]({{< relref "syntax/stage-file#workload" >}}) section determines how and when Finch executes transactions.
 
 {{< hint type="tip" >}}
-Read  [Client and Execution Groups](/intro/concepts/#client-and-execution-groups) first.
+Read  [Client and Execution Groups]({{< relref "intro/concepts#client-and-execution-groups" >}}) first.
 {{< /hint >}}
 
 {{< toc >}}
 
 ## Default
 
-The [`stage.workload`](/syntax/stage-file/#workload) section is optional.
+The [`stage.workload`]({{< relref "syntax/stage-file#workload" >}}) section is optional.
 If omitted, Finch auto-detects and auto-allocates a default workload:
 
 ```yaml
@@ -29,7 +29,7 @@ stage:
 #     runtime: 0   #  0=forever
 ```
 
-The default workload runs all trx in _trx order_: the order trx files are specified in [`stage.trx`](/syntax/stage-file/#trx).
+The default workload runs all trx in _trx order_: the order trx files are specified in [`stage.trx`]({{< relref "syntax/stage-file#trx" >}}).
 
 The example above is a stage with two trx files: A and B, in that order.
 Since there's no explicit workload, the default workload is shown (commented out): 1 client runs both trx (in trx order) forever&mdash;or until you enter CTRL-C to stop the stage.
@@ -121,8 +121,8 @@ Multiple runtime limits are checked with logical _OR_: Finch stops as soon as on
 
 ### Runtime
 
-Setting [stage.runtime](/syntax/stage-file/#runtime) will stop the entire stage, even if some execution groups haven't run yet.
-Setting [stage.workload.[CG].runtime](/syntax/stage-file/#runtime-1) will stop the client group.
+Setting [stage.runtime]({{< relref "syntax/stage-file#runtime" >}}) will stop the entire stage, even if some execution groups haven't run yet.
+Setting [stage.workload.[CG].runtime]({{< relref "syntax/stage-file#runtime-1" >}}) will stop the client group.
 Since execution groups are formed by client groups ([P6](#P6)), this is effectively an execution group runtime limit.
 There is no runtime limit for individual clients; if needed, use a client group with `clients: 1`.
 
@@ -151,13 +151,13 @@ Finch [auto-allocates](#auto-allocation) `iter = 1` for client groups with DDL i
 
 ### Data
 
-[Data limits](/data/limits) will stop Finch even without a runtime or iterations limit.
+[Data limits]({{< relref "data/limits" >}}) will stop Finch even without a runtime or iterations limit.
 When using a data limit, you probably want `runtime = 0` (forever) and `iter = 0` (unlimited) to ensure Finch stops only when the total data size is reached.
 And since Finch [auto-allcoates](#auto-allocation) `iter = 1` for client groups with DDL in an assigned trx, you shouldn't mix DDL and DML with a data limit in the same trx because `iter = 1` will stop Finch before the data limit.
 
 ## Examples
 
-To focus on the workload, let's presume a stage with three [trx files](../trx/):
+To focus on the workload, let's presume a stage with three [trx files]({{< relref "benchmark/trx" >}}):
 
 ```yaml
 stage:
@@ -178,7 +178,7 @@ workload:
   - trx: [A, B, C]
 ```
 
-That executes all three trx at the same time, with one client because [`workload.clients`](/syntax/stage-file/#clients) defaults to 1.
+That executes all three trx at the same time, with one client because [`workload.clients`]({{< relref "syntax/stage-file#clients" >}}) defaults to 1.
 You usually specify more clients:
 
 ```yaml
@@ -209,7 +209,7 @@ workload:
 ```
 
 Finch executes EG "first", then EG "second", then EG "third".
-This type of workload is typical for a [DDL stage](../overview/#ddl) because order is important, but in this case there's an easier way: auto-DDL.
+This type of workload is typical for a [DDL stage]({{< relref "benchmark/overview#ddl" >}}) because order is important, but in this case there's an easier way: auto-DDL.
 
 ### Auto-DDL
 
