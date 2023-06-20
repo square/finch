@@ -1,0 +1,23 @@
+html {scroll-behavior: auto;} /* No animated scrolling on link click */
+code {overflow-x: scroll;} /* Horizontal scrolling for long code blocks */
+
+:root,
+:root[color-theme="light"],
+:root[color-theme="dark"]
+{
+  --mark-color: lightyellow;
+}
+
+.tagline {
+  font-style: italic;
+}
+
+table.compact.params {
+  width: auto !important;
+}
+
+.gdoc-markdown h3 > code {
+  border: none !important;
+  background-color: unset !important;
+  font-size: 0.9em !important;
+}

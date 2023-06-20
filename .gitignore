@@ -5,4 +5,7 @@
 bin/finch/finch
 bin/finch/finch-amd64
 bin/finch/*.yaml
+bin/finch/*.sql
 bin/finch/*.sh
+docs/.hugo_build.lock
+docs/public/
