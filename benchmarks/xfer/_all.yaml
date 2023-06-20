@@ -2,5 +2,5 @@ mysql:
   dsn: "root@tcp(127.0.0.1:3306)/"
 
 params:
-  customers: 1,000,000 # and 3 balances per customer
-  xfers-size: 10KiB # 1GiB # about 1.89M rows
+  customers: 1,000,000 # 3 balances per customer
+  xfers-size: 10KiB    # 1GiB # about 1.89M rows

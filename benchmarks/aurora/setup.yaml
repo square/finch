@@ -6,15 +6,15 @@ stage:
     - file: trx/insert-rows.sql
       data:
         k:
-          generator: "rand-int"
+          generator: "int"
           params:
             max: 65536
         c:
-          generator: "str-not-null"
+          generator: "str-fill-az"
           params:
             len: 119 # not a typo
         pad:
-          generator: "str-not-null"
+          generator: "str-fill-az"
           params:
             len: 59 # not a typo
     - file: trx/analyze-tables.sql

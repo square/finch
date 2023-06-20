@@ -9,9 +9,9 @@ stage:
   # bounds of rows accessed. The default is the top 25% (250k) rows because it's
   # common that only a fraction of customers are active.
   params:
-    active: 250k
-    min-row: 500k
-    max-row: $params.customers
+    min: 500k
+    max: $params.customers
+    active: 20  # percentage of active customers
 
   runtime: 60s
 
@@ -24,10 +24,11 @@ stage:
       data:
         # Select a random sender (by customers.id)
         sender_id:
-          generator: "project-int"
+          generator: "int-gaps"
           params:
-            input-max: $params.active
-            output-range: ${params.min-row}..${params.max-row}
+            p: $params.active
+            min: $params.min
+            max: $params.max
         sender_balance_id:
           generator: column
           data-type: numeric
@@ -37,8 +38,8 @@ stage:
           generator: "int-range"
           params:
             size: 100 # random 100-value range between
-            min: $params.min-row 
-            max: $params.max-row
+            min: $params.min
+            max: $params.max
         receiver_balance_id:
           generator: column
           data-type: numeric
@@ -50,14 +51,15 @@ stage:
           generator: column
           data-type: numeric
         c1:
-          generator: "str-not-null"
+          generator: "str-fill-az"
           params:
             len: 25
         c2:
-          generator: "str-not-null"
+          generator: "str-fill-az"
           params:
             len: 75
         c3:
-          generator: "str-not-null"
+          generator: "str-fill-az"
           params:
             len: 10
+

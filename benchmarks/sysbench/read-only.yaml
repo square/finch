@@ -10,7 +10,7 @@ stage:
     - file: trx/read-only.sql
       data:
         id:
-          generator: "rand-int"
+          generator: "int"
           scope: client
           params:
             max: $params.rows

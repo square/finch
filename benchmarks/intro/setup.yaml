@@ -1,0 +1,10 @@
+stage:
+  trx:
+    - file: insert-rows.sql
+      data:
+        id:
+          generator: "auto-inc"
+        n:
+          generator: "int"
+        c:
+          generator: "str-fill-az"

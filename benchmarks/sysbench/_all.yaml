@@ -15,7 +15,7 @@ mysql:
 # and trx (SQL) files, like number of tables and rows. Each param is referenced
 # like $params.rows or "${params.rows}". (YAML requires quotes around {}.)
 params:
-  rows: "1,000,000" # You can use human-readable numbers like this or "1M" 
+  rows: "10,000" # You can use human-readable numbers like this or "10k" 
 
 # __ 03 _____________________________________________________________________
 #

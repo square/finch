@@ -1,0 +1,9 @@
+stage:
+  runtime: 10s
+  workload:
+    - clients: 4
+  trx:
+    - file: read-only.sql
+      data:
+        id:
+          generator: "int"

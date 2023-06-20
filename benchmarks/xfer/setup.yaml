@@ -25,23 +25,23 @@ stage:
         b_token:
           generator: xid
         c_c1:
-          generator: "str-not-null"
+          generator: "str-fill-az"
           params:
             len: 20
         c_c2:
-          generator: "str-not-null"
+          generator: "str-fill-az"
           params:
             len: 50
         c_c3:
-          generator: "str-not-null"
+          generator: "str-fill-az"
           params:
             len: 75
         b_c1:
-          generator: "str-not-null"
+          generator: "str-fill-az"
           params:
             len: 30
         b_c2:
-          generator: "str-not-null"
+          generator: "str-fill-az"
           params:
             len: 50
     - file: ./trx/insert-xfers.sql
@@ -53,14 +53,14 @@ stage:
         r_token:
           generator: "xid"
         c1:
-          generator: "str-not-null"
+          generator: "str-fill-az"
           params:
             len: 10
         c2:
-          generator: "str-not-null"
+          generator: "str-fill-az"
           params:
             len: 50
         c3:
-          generator: "str-not-null"
+          generator: "str-fill-az"
           params:
             len: 5

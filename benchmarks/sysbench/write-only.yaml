@@ -10,27 +10,25 @@ stage:
     - file: trx/write-only.sql
       data:
         id:
-          generator: "rand-int"
+          generator: "int"
           params:
-            min: 1
             max: $params.rows
             dist: normal
         del_id:
-          generator: "rand-int"
+          generator: "int"
           scope: trx
           params:
-            min: 1
             max: $params.rows
             dist: normal
         k:
-          generator: "rand-int"
+          generator: "int"
           params:
             max: 65536
         c:
-          generator: "str-not-null"
+          generator: "str-fill-az"
           params:
             len: 119
         pad:
-          generator: "str-not-null"
+          generator: "str-fill-az"
           params:
             len: 59

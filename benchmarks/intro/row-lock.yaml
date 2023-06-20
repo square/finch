@@ -1,0 +1,12 @@
+stage:
+  runtime: 20s
+  workload:
+    - clients: 4
+  trx:
+    - file: rw-trx.sql
+      data:
+        id:
+          generator: "int"
+          scope: trx
+          params:
+            max: 1,000
