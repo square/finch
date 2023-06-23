@@ -294,7 +294,7 @@ func (f *File) statement() ([]*Statement, error) {
 			}
 			s.InsertId = dataKey
 			s.Outputs = append(s.Outputs, dataKey)
-		case "save-result", "save-results":
+		case "save-columns":
 			// @todo check len(m)
 			for i, col := range m[1:] {
 				// @todo split csv (handle "col1,col2" instead of "col1, col2")
@@ -359,6 +359,7 @@ func (f *File) statement() ([]*Statement, error) {
 	// ----------------------------------------------------------------------
 	// Expand CSV /*!csv N val*/
 	// ----------------------------------------------------------------------
+	multiValue := false
 	m := reCSV.FindStringSubmatch(query)
 	if len(m) > 0 {
 		n, err := strconv.ParseInt(m[1], 10, 32)
@@ -373,6 +374,7 @@ func (f *File) statement() ([]*Statement, error) {
 		}
 		csv := strings.Join(vals, ", ")
 		query = reCSV.ReplaceAllLiteralString(query, csv)
+		multiValue = true
 	}
 
 	// ----------------------------------------------------------------------
@@ -408,6 +410,9 @@ func (f *File) statement() ([]*Statement, error) {
 					return nil, fmt.Errorf("no params for data name %s", name)
 				}
 				finch.Debug("make data generator %s for %s", dataCfg.Generator, name)
+				if multiValue && dataCfg.Scope == "" {
+					dataCfg.Scope = finch.SCOPE_VALUE
+				}
 				g, err = data.Make(dataCfg.Generator, name, dataCfg.Scope, dataCfg.Params)
 				if err != nil {
 					return nil, err

@@ -114,7 +114,7 @@ func (c *Client) run(ctxFinch context.Context) error {
 	log.Printf("[%s] Booting", stageName)
 	local := stage.New(cfg, c.gds, stats)
 	if err := local.Prepare(ctxFinch); err != nil {
-		log.Printf("[%s] Boot error, notifying server: %s", err)
+		log.Printf("[%s] Boot error, notifying server: %s", stageName, err)
 		c.client.Send(ctxFinch, "/boot", err.Error(), proto.R{500 * time.Millisecond, 100 * time.Millisecond, 3}) // don't care if this fails
 		return err                                                                                                // return original error not Send error
 	}

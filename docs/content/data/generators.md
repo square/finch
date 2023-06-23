@@ -101,18 +101,22 @@ Returns [rs/xid](https://github.com/rs/xid) values as strings.
 
 ## Column
 
-The `column` generator is used for [`--save-insert-id`]({{< relref "syntax/trx-file#save-insert-id" >}}) and [`--save-result`]({{< relref "syntax/trx-file#save-result" >}})
+The `column` generator is used for SQL modifiers [`save-insert-id`]({{< relref "syntax/trx-file#save-insert-id" >}}) and [`save-result`]({{< relref "syntax/trx-file#save-result" >}})
 {.tagline}
 
 
-|Param|Default|Valid Value (n)|
+|Param|Default|Valid Value|
 |-----|-------|----|
-|`quote`|yes|yes or no|
+|`quote-value`|yes|[string-bool]({{< relref "syntax/values#string-bool" >}})
 {.compact .params}
 
-The `quote` param determines if the value is quoted or not when used as output to a SQL statement:
+The `quote-value` param determines if the value is quoted or not when used as output to a SQL statement:
 
 * yes &rarr; `WHERE id = "%v"`
 * no &rarr; `WHERE id = %v`
 
 The underlying MySQL column type does not matter because the value is not cast to a data type; it's inputted and outputted as raw bytes.
+
+The default [data scope]({{< relref "data/scope" >}}) for column data is _trx_, not statement.
+This can be changed with an explicit scope configuration.
+Iter data scope might be useful, but statement (or value) scope will probably not work since the purpose is to resue the value in another statment.

@@ -203,7 +203,7 @@ EXEC_GROUPS:
 		select {
 		case <-s.stats.Done():
 		case <-timeout:
-			log.Println("[%s] Timeout waiting for final stats, forcing final report (some stats might be lost)", s.cfg.Name)
+			log.Printf("[%s] Timeout waiting for final stats, forcing final report (some stats might be lost)\n", s.cfg.Name)
 			s.stats.Report()
 		}
 	}

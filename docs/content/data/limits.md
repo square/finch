@@ -39,8 +39,8 @@ How much RAM a system has (and MySQL is configured to use) is another factor: ev
 
 Depending on the benchmark, it might be better to generate certain data sizes, rather than row counts:
 
-* [`--database-size`]({{< relref "syntax/trx-file#database-size" >}})
-* [`--table-size`]({{< relref "syntax/trx-file#table-size" >}})
+* [`database-size`]({{< relref "syntax/trx-file#database-size" >}})
+* [`table-size`]({{< relref "syntax/trx-file#table-size" >}})
 
 These statement modifiers are usually used in [DDL stages]({{< relref "benchmark/overview#ddl" >}}).
 Combine with a [parallel load]({{< relref "benchmark/workload#parallel-load" >}}) and you can load terabytes of data relatively quickly.

@@ -41,40 +41,31 @@ func NewScope() *Scope {
 }
 
 func (s *Scope) Copy(keyName string, rl finch.RunLevel) Generator {
+	// Don't copy @PREV because the previous generator will return 2 values
 	if keyName == "@PREV" {
 		return nil
 	}
+
 	k, ok := s.Keys[keyName]
 	if !ok {
-		panic("key not loaded: " + keyName)
+		panic("key not loaded: " + keyName) // panic because input already validated
 	}
-	scope := k.Generator.Id().Scope
 
+	// Copy the data generator if its configured scope has changed
+	scope := k.Generator.Id().Scope // configured scope
+	prev := s.CopiedAt[keyName]     // last time we say this @d
+	cp := false                     // scope has changed; copy data generator
 	switch scope {
+	case finch.SCOPE_VALUE:
+		cp = true // every value is new, so always copy
 	case "", finch.SCOPE_STATEMENT:
-		return k.Generator.Copy(rl)
-	case finch.SCOPE_GLOBAL:
-		return k.Generator
-	}
-
-	prev := s.CopiedAt[keyName]
-	cp := false
-	switch scope {
-	case finch.SCOPE_STAGE, finch.SCOPE_WORKLOAD:
-		// Scopes stage == workload because currently there's no config.stage.iterations.
-		// If that's added, then we'll need to add Scope.Workload uint and increment that
-		// count whenever the stage is re-run.
-		cp = rl.Stage != prev.Stage
-	case finch.SCOPE_EXEC_GROUP:
-		cp = rl.ExecGroup > prev.ExecGroup
-	case finch.SCOPE_CLIENT_GROUP:
-		cp = rl.ClientGroup > prev.ClientGroup
-	case finch.SCOPE_CLIENT:
-		cp = rl.Client > prev.Client
+		cp = rl.Query > prev.Query || rl.Trx > prev.Trx || rl.Client > prev.Client
 	case finch.SCOPE_TRX:
 		cp = rl.Trx > prev.Trx || rl.Client > prev.Client
+	case finch.SCOPE_CLIENT:
+		cp = rl.Client > prev.Client
 	default:
-		panic("invalid scope: " + scope)
+		panic("invalid scope: " + scope) // panic because input already validated
 	}
 	if cp {
 		s.CopyOf[keyName] = k.Generator.Copy(rl)
@@ -103,12 +94,12 @@ func (s *Scope) Reset() {
 // Statements are not counted because every call to Generator.Values is +1 statement.
 // Only trx and iter are counted because the other higher-level scopes haven't
 // been needed and it's not clear when they should increment.
-type RunCount [2]uint
+type RunCount [3]uint
 
 const (
 	ITER byte = iota
 	TRX
-	STATEMENT // not counted by needed for fast path in ScopedGenerator.Values.
+	STATEMENT
 )
 
 var runlevelNumber = map[string]byte{
@@ -151,10 +142,7 @@ func (g *ScopedGenerator) Copy(r finch.RunLevel) Generator {
 }
 
 func (g *ScopedGenerator) Values(cnt RunCount) []interface{} {
-	if g.sno == STATEMENT {
-		return g.g.Values(cnt) // fast path
-	}
-	if cnt[g.sno] > g.last[g.sno] { // trx or iter
+	if cnt[g.sno] > g.last[g.sno] {
 		g.last[g.sno] = cnt[g.sno]
 		g.vals = g.g.Values(cnt)
 	}

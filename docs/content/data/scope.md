@@ -2,27 +2,23 @@
 weight: 2
 ---
 
-Data keys are scoped to the Finch [run levels]({{< relref "intro/concepts#run-levels" >}}):
+Data keys have four scopes:
 
 ```
-global
-└──stage
-   └──workload
-      └──exec-group
-         └──client-group
-            └──client (iter)
-               └──trx
-                  └──statment
+iter
+└──trx
+   └──statement (default)
+      └──value
 ```
 
 Data scope answers two related question:
 
 1. Where is @d unique?
-2. When does @d return a new value?
+2. When is @d called?
 
-Answer: <mark><b>a data key is unique within its scope and returns a new value when that scope runs.</b></mark>
+Answer: <mark><b>a data key is unique within its scope, and (its generator) is called once per scope execution.</b></mark>
 
-To help explain (and for brevity), let's use the same notation that Finch uses internally to identify data keys:
+To explain (and for brevity), let's use the same data ID notation that Finch uses internally to identify data keys:
 
 `@d(N)/scope`
 
@@ -35,7 +31,33 @@ Normal Finch output doesn't print data IDs, but you can see them with [`--debug`
 
 {{< toc >}}
 
+## Configure
+
+Specify [`stage.trx[].data.d.scope`]({{< relref "syntax/stage-file#dscope" >}}) for each data key:
+
+```yaml
+stage:
+  trx:
+    - file:
+      data:
+        d:
+          generator: int
+          scope: trx
+```
+
+## Call vs. Value
+
+When the data generator for @d is called, the presumption is that it (the generator) returns a new value.
+The [built-in generators]({{< relref "data/generators" >}}) return random and sequential values.
+But since data generators are plugins, Finch doesn't know or care if the "new" value is actually new.
+For example, a [custom data generator]({{< relref "api/data" >}}) might return values 1, 1, 1, 2, 2, 2, 3, 3, 3&mdash;and so on.
+That's valid, but the values aren't always "new".
+Consequently, data scope focuses on when (the data generator) for @d is _called_, not if or when it returns a new value.
+
 ## Statement
+
+Although value scope is the lowest level scope, statement scope is the default, so let's start here.
+Plus, value scope is a special case, so it's explained last.
 
 Suppose you have the same trx (with two pseudo-SQL statements for brevity) being executed by 2 clients in the same [client/execution group]({{< relref "intro/concepts#client-and-execution-groups" >}}):
 
@@ -57,16 +79,12 @@ UPDATE @d
 
 Data scope determines if @d is the same generator in all four references or different.
 
-|Data Scope|Client 1|Client 2|
-|----------|--------|--------|
-|statement|@d(1)/statement<br>@d(2)/statement|@d(3)/statement<br>@d(4)/statement|
-|trx|@d(1)/trx<br>@d(1)/trx|@d(2)/trx<br>@d(2)/trx|
-|client|@d(1)/client<br>@d(1)/client|@d(2)/client<br>@d(2)/client|
+|Data Scope|Statement|Client 1|Client 2|
+|----------|---------|--------|--------|
+|statement|SELECT<br>UPDATE|@d(1)/statement<br>@d(2)/statement|@d(3)/statement<br>@d(4)/statement|
+|trx|SELECT<br>UPDATE|@d(1)/trx<br>@d(1)/trx|@d(2)/trx<br>@d(2)/trx|
 
-Ignore client scope for the moment; we'll come back to it.
-
-1. Where is @d unique?
-
+Where is @d unique?
 With statement scope, @d is unique in each statement, evidenced by the copy numbers: "(1)", "(2)", "(3)", and "(4)".
 Those mean Finch instantiated four different copies of the data generator.
 All four have the same configuration (see [Data / Keys / Duplicates]({{< relref "data/keys#duplicates" >}})), but they are unique and separate instances of the generator, like:
@@ -78,13 +96,19 @@ d3 := NewGenerator(config)
 d4 := NewGenerator(config)
 ```
 
-2. When does @d return a new value?
-
-Since a data generator returns a new value when that scope runs, and the four generators are statement-scoped, then each generator returns a new value when the client runs (executes) its corresponding statement.
-
-When client 1 runs its `SELECT`, @d(1)/statement returns a new value.
-When client 1 runs its `SELECT` again, @d(1)/statement returns a new value, and so on for however many times client 1 runs its `SELECT`.
+When is @d called?
+Since a data generator is called once per scope execution, and @d is statement-scoped, then @d is called once per statement&mdash;when the client executes the statement.
+When client 1 runs its `SELECT`, Finch calls @d(1)/statement.
+When client 1 runs its `SELECT` again, Finch calls @d(1)/statement again, and so on for however many times client 1 runs its `SELECT`.
 Likewise for its `UPDATE` and for client 2 running its SQL statements.
+
+And what about the following query?
+
+```sql
+SELECT ... WHERE a = @d OR b = @d
+```
+
+Since @d is statement-scoped, it's called once per statement, so @d has the same value for both conditions (on both sides of `OR`).
 
 ## Trx
 
@@ -92,11 +116,8 @@ Continuing the previous example, trx scope creates two generators instead of fou
 In client 1, the data ID is the same because it's the same data generator: @d(1)/trx for both SQL statements.
 Likewise for client 2: @d(2)/trx for both SQL statements.
 
-When client 1 runs its trx, @d(1)/trx returns a new value that is first used for its `SELECT`.
-When client 1 runs its `UPDATE`, which is in the same trx, @d(1)/trx returns the same value.
-This means the `SELECT` and the `UPDATE` get the same value for @id.
-
-When client 1 runs its trx again, then @d(1)/trx returns a new value and the cycle repeats.
+When client 1 runs its trx, Finch calls @d(1)/trx once for the trx, and whatever value @d(1)/trx returns is used in both statements.
+When client 1 runs its trx again, Finch @d(1)/trx  again, and the cycle repeats.
 The same happens for client 2.
 
 Trx scope is aptly named because it's how you can "share" (or "sync") generated data in the same trx.
@@ -125,54 +146,57 @@ Trx-scoped means @d is unique within a trx, even if the client is the same:
 
 |Data Scope|Trx A|Trx B|
 |----------|--------|--------|
-|trx|@d(1)/trx<br>@d(1)/trx|@d(2)/trx<br>&nbsp;|
+|trx|SELECT @d(1)/trx<br>UPDATE @d(1)/trx|DELETE @d(2)/trx<br>&nbsp;|
 
-This example is important because it leads us to client-scoped data.
+This example is important because it leads us to iter-scoped data.
 
-## Client
+## Iter
 
-In the first table (in [Statement](#statement)), trx and client data scope seem to have the same data IDs for each client.
-The example immediately above&mdash;client 1 with trx A and B&mdash;explains why: client scope makes @d unique in _all trx_ on the client.
+An _iteration (iter)_ is one execution of all trx assigned to a client.
+Therefore, iter scope makes @d unique in _all_ assigned trx, per client, and it's called once per iteration.
+
+Compare the example immediately above&mdash;client 1 with trx A and B&mdash;with iter scope instead (the difference is highlighted):
 
 |Data Scope|Trx A|Trx B|
 |----------|--------|--------|
-|client|@d(1)/trx<br>@d(1)/trx|@d(1)/trx<br>&nbsp;|
+|iter|SELECT @d(1)/trx<br>UPDATE @d(1)/trx|DELETE <mark>@d(1)/trx</mark><br>&nbsp;|
 
-With client scope, @d in trx B is the same as @d in trx A, as evidenced by the same data ID: @d(1)/trx.
+With iter scope, @d in trx B is the same as @d in trx A, as evidenced by the same data ID: @d(1)/trx.
 
-That answers "1. Where is @d unique?", and the answer to "2. When does @d return a new value?" is: on each [iteration]({{< relref "benchmark/workload#iterations" >}}).
-For data scope, "client" and "iter" are synonymous because the main loop of a client iterates through all its [assigned trx]({{< relref "benchmark/workload#trx" >}}).
+## Value
 
-## Higher Scopes
+Value scope is a special case for multi-row `INSERT`:
 
-```
-global
-└──stage
-   └──workload
-      └──exec-group
-         └──client-group
+```sql
+INSERT INTO t VALUES (@d), (@d), (@d)
 ```
 
-Data scopes for the higher scopes shown above are not fully implemented because there's been no need for them yet.
-It's also unclear how they might work.
-For example, client group scope is clear in terms of where @d is unique: all clients, all trx, all statements.
-But when should @d return a new value?
-Probably after every client in the group has executed one iteration.
-But client execution time varies, so this scope would be blocking.
+With statement scope (or higher), every @d would have the same value, but that's probably wrong because the presumptive norm is different row, not duplicate rows.
+To achieve different rows, you would need different data keys:
 
-If this changes, this section will be updated.
-For now, statement, trx, and client (iter) scope are sufficient to orchestrate complex, realistic workloads.
-
-## Configure
-
-Specify [`stage.trx[].data.d.scope`]({{< relref "syntax/stage-file#dscope" >}}) for each data key:
-
-```yaml
-stage:
-  trx:
-    - file:
-      data:
-        d:
-          generator: int
-          scope: trx
+```sql
+INSERT INTO t VALUES (@d1), (@d2), (@d3)
 ```
+
+That works in some cases but not all.
+For example, suppose you want to use the [auto-inc generator]({{< relref "data/generators#auto-inc" >}}) to produce rows/values "(1), (2), (3)".
+With @d1, @d2, and @d3 being separate data keys and, therefore, separate data generators, it won't work; it will produce "(1), (1), (1)".
+You need a single day key, @d, to produce the monotonic sequence. 
+
+Value data scope solves the problem: with value scope, @d is unique per statement and called _per occurrence of @d._
+
+The problem also affects the [CSV substitution]({{< relref "syntax/trx-file#csv" >}}) because it repeats the same data key for each row/value.
+As a result, Finch uses value scope automatically for the [CSV substitution]({{< relref "syntax/trx-file#csv" >}}) if you do not explicitly define a scope.
+
+You can explicitly define value scope for any data key, but it might be confusing.
+Consider this statement:
+
+```sql
+SELECT ... WHERE a = @d OR b = @d
+```
+
+With value scope, @d is called twice and likely returns two different values (see [Call vs. Value](#call-vs-value)), but that confuses the relationship between columns `a` and `b` and @d as discussed in [Data / Keys / Name and Configure]({{< relref "data/keys#name-and-configure" >}}):
+
+> a good practice is to name data keys after the columns for which they’re used
+
+So it would be more clear to have `a = @a OR b = @b`, both data keys with the default statement scope.

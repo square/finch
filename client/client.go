@@ -217,6 +217,7 @@ ITER:
 			// Generate new data values for this query. A single data generator
 			// can return multiple values, so d makes copy() append, else copy()
 			// would start at [0:] each time
+			rc[data.STATEMENT] += 1
 			d := 0
 			for _, g := range c.Data[i].Inputs {
 				d += copy(c.values[i][d:], g.Values(rc))

@@ -79,7 +79,7 @@ var f = &factory{}
 
 func (f factory) Make(name, dataName, scope string, params map[string]string) (Generator, error) {
 	switch scope {
-	case "", finch.SCOPE_STATEMENT, finch.SCOPE_TRX, finch.SCOPE_CLIENT:
+	case "", finch.SCOPE_VALUE, finch.SCOPE_STATEMENT, finch.SCOPE_TRX, finch.SCOPE_CLIENT:
 		// valid
 	default:
 		return nil, fmt.Errorf("%s: invalid data scope: %s; valid values: %s, %s, %s (default: %s)",
@@ -120,12 +120,12 @@ func (f factory) Make(name, dataName, scope string, params map[string]string) (G
 		return nil, err
 	}
 
-	// Statement-scoped; don't wrap
-	if id.Scope == "" || id.Scope == finch.SCOPE_STATEMENT {
+	// Special case for INSERT INTO t VALUES (@d), (@d), ..., N: same @d but called N times
+	if id.Scope == finch.SCOPE_VALUE {
 		return g, nil
 	}
 
-	// Trx scope and higher: wrap in ScopedGenerator that will handle scope logic
+	// Wrap real generator in ScopedGenerator that handles scope logic
 	return NewScopedGenerator(g), nil
 }
 

@@ -1,6 +1,6 @@
 
 
--- save-result: @c
+-- save-columns: @c
 select c from t1 where id=1
 
 

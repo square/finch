@@ -59,6 +59,7 @@ const (
 	SCOPE_CLIENT       = "client"
 	SCOPE_TRX          = "trx"
 	SCOPE_STATEMENT    = "statement"
+	SCOPE_VALUE        = "value" // special: INSERT INTO t VALUES (@d), (@d), ...
 )
 
 var (

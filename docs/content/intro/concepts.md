@@ -22,7 +22,7 @@ global
          └──client group
             └──client
                └──trx
-                  └──statment
+                  └──statement
 ```
 
 These are called _run levels_ because they determine if, when, and how various aspects of Finch run.

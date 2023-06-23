@@ -23,7 +23,7 @@ func TestLoad_001(t *testing.T) {
 			File: "../test/trx/001.sql",
 			Data: map[string]config.Data{
 				"id": {
-					Generator: "rand-int",
+					Generator: "int",
 				},
 			},
 		},
@@ -80,7 +80,7 @@ func TestLoad_002(t *testing.T) {
 			File: "../test/trx/002.sql",
 			Data: map[string]config.Data{
 				"d": {
-					Generator: "rand-int",
+					Generator: "int",
 				},
 			},
 		},
@@ -250,7 +250,7 @@ func TestLoad_copy3(t *testing.T) {
 			File: "../test/trx/copy3-1.sql",
 			Data: map[string]config.Data{
 				"id": {
-					Generator: "rand-int",
+					Generator: "int",
 					Scope:     "trx",
 				},
 			},
@@ -275,7 +275,7 @@ func TestLoad_copy3(t *testing.T) {
 			File: "../test/trx/copy3-2.sql",
 			Data: map[string]config.Data{
 				"id": {
-					Generator: "rand-int",
+					Generator: "int",
 					Scope:     "trx",
 				},
 			},
@@ -326,7 +326,7 @@ func TestLoad_COPY_NUMBER(t *testing.T) {
 			File: "../test/trx/copy-no.sql",
 			Data: map[string]config.Data{
 				"id": {
-					Generator: "rand-int",
+					Generator: "int",
 					Scope:     "trx",
 				},
 			},

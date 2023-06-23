@@ -118,7 +118,11 @@ func TestScope_PREV(t *testing.T) {
 	// return multiple values."
 	keyName := "@d"
 	g, _ := data.NewAutoInc(data.Id{Type: "auto-inc", DataKey: keyName, Scope: finch.SCOPE_STATEMENT}, nil)
-	r := finch.RunLevel{}
+	r := finch.RunLevel{
+		Client: 1,
+		Trx:    1,
+		Query:  1,
+	}
 	scope := data.NewScope()
 	scope.Keys[keyName] = data.Key{
 		Name:      keyName,
