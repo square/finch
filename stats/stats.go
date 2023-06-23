@@ -224,17 +224,15 @@ type Trx struct {
 }
 
 func NewTrx(name string) *Trx {
-	a := NewStats()
-	b := NewStats()
-	sp := atomic.Pointer[Stats]{}
-	sp.Store(a)
-	return &Trx{
+	t := &Trx{
 		Name: name,
-		sp:   sp,
-		a:    a,
-		b:    b,
+		sp:   atomic.Pointer[Stats]{},
+		a:    NewStats(),
+		b:    NewStats(),
 		onA:  true,
 	}
+	t.sp.Store(t.a)
+	return t
 }
 
 func (t *Trx) Record(eventType byte, d int64) {
