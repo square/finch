@@ -18,16 +18,17 @@ import (
 	"github.com/square/finch/workload"
 )
 
-// A stage runs clients to execute events. Each client is identical.
-// Stage runs the workload, controlling the order (by subset, if any).
+// Stage allocates and runs a workload. It handles stats for the workload,
+// including reporting. A stage has a two-phase execute: Prepare to set up
+// everything, then Run to execute clients (which execute queries). Run is
+// optional; it's not run when --test is specified on the command line.
 type Stage struct {
 	cfg   config.Stage
 	gds   *data.Scope
 	stats *stats.Collector
 	// --
-	doneChan       chan *client.Client      // <-Client.Run()
-	execGroups     [][]workload.ClientGroup // [n][Client]
-	runtimeLimited bool                     // true is run time is limited
+	doneChan   chan *client.Client      // <-Client.Run()
+	execGroups [][]workload.ClientGroup // [n][Client]
 }
 
 func New(cfg config.Stage, gds *data.Scope, stats *stats.Collector) *Stage {

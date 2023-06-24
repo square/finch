@@ -98,6 +98,8 @@ func BoolString(b bool) string {
 
 var portRe = regexp.MustCompile(`:\d+$`)
 
+// WithPort return s:p if s doesn't have port suffix p.
+// p must not have a colon prefix.
 func WithPort(s, p string) string {
 	if portRe.MatchString(s) {
 		return s
@@ -105,10 +107,8 @@ func WithPort(s, p string) string {
 	return s + ":" + p
 }
 
+// Uint returns s as a unit presuming s has already been validated.
 func Uint(s string) uint {
-	if s == "" {
-		return 0
-	}
 	i, _ := strconv.ParseUint(s, 10, 64)
 	return uint(i)
 }
