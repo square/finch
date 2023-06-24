@@ -12,14 +12,15 @@ import (
 
 // Options represents the command line options
 type Options struct {
-	Bind    string `arg:"env:FINCH_BIND" default:":33075"`
-	Debug   bool   `arg:"env:FINCH_DEBUG"`
-	DSN     string `arg:"env:FINCH_DSN"`
-	Help    bool
-	Params  []string `arg:"-p,--param,separate"`
-	Server  string   `arg:"env:FINCH_SERVER"`
-	Test    bool     `arg:"env:FINCH_TEST"`
-	Version bool
+	Client     string `arg:"env:FINCH_CLIENT"`
+	CPUProfile string `arg:"--cpu-profile,env:FINCH_CPU_PROFILE"`
+	Debug      bool   `arg:"env:FINCH_DEBUG"`
+	DSN        string `arg:"env:FINCH_DSN"`
+	Help       bool
+	Params     []string `arg:"-p,--param,separate"`
+	Server     string   `arg:"env:FINCH_SERVER"`
+	Test       bool     `arg:"env:FINCH_TEST"`
+	Version    bool
 }
 
 type CommandLine struct {
@@ -50,17 +51,19 @@ func printHelp() {
 	fmt.Printf("Usage:\n"+
 		"  finch [options] STAGE_1_FILE [STAGE_N_FILE...]\n\n"+
 		"Options:\n"+
-		"  --bind ADDR[:PORT]    Listen for clients on ADDR, or \"-\" to disable server API (default: :%s)\n"+
+		"  --client ADDR[:PORT]  Run as client of server at ADDR\n"+
+		"  --cpu-profile FILE    Save CPU profile of stage execution to FILE\n"+
 		"  --debug               Print debug output to stderr\n"+
-		"  --dsn                 MySQL DSN (overrides stage files)\n"+
+		"  --dsn DSN             MySQL DSN (overrides stage files)\n"+
 		"  --help                Print help and exit\n"+
 		"  --param (-p) KEY=VAL  Set param key=value (override stage files)\n"+
-		"  --server ADDR[:PORT]  Connect to server at ADDR\n"+
+		"  --server ADDR[:PORT]  Run as server on ADDR\n"+
 		"  --test                Validate stages, test connections, and exit\n"+
 		"  --version             Print version and exit\n"+
 		"\n"+
+		"Docs:\n"+
+		"  https://square.github.io/finch/\n\n"+
 		"finch %s\n",
-		finch.DEFAULT_SERVER_PORT,
 		finch.VERSION,
 	)
 }

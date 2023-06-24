@@ -84,7 +84,7 @@ func (r *Stdout) print(in *Instance) {
 	for _, v := range s.Errors {
 		errorCount += v
 	}
-	line := fmt.Sprintf("%d\t%1.f\t%d\t%d\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\t%s\n",
+	line := fmt.Sprintf("%d\t%.1f\t%.1f\t%d\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\t%s\tP\t%s\t%s\t%s\n",
 		in.Interval,
 		in.Seconds, // duration (of interval)
 		in.Runtime,

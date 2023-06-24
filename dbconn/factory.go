@@ -33,43 +33,35 @@ var portSuffix = regexp.MustCompile(`:\d+$`)
 var f = &factory{}
 
 type factory struct {
-	cfg      config.MySQL
-	modifyDB func(*sql.DB, string)
-	// --
-	loaded bool
-	dsn    string
+	cfg config.MySQL
+	dsn string
 }
 
-func SetFactory(cfg config.MySQL, modifyDB func(*sql.DB, string)) {
+func SetConfig(cfg config.MySQL) {
 	f.cfg = cfg
-	f.modifyDB = modifyDB
 }
 
 func Make() (*sql.DB, string, error) {
-	if !f.loaded {
+	// Parse MySQL params and set DSN on first call. There's only 1 DSN for
+	// all clients, so this only needs to be done once.
+	if f.dsn == "" {
 		if err := f.setDSN(); err != nil {
 			return nil, "", err
 		}
-		f.loaded = true
 		log.Printf("%s\n", RedactedDSN(f.dsn))
 	}
 
+	// Make new sql.DB (conn pool) for each client group; see the call to
+	// this func in workload/workload.go.
 	db, err := sql.Open("mysql", f.dsn)
 	if err != nil {
 		return nil, "", err
 	}
-
-	db.SetMaxOpenConns(1)
-
-	// Let user-provided plugin set/change DB
-	if f.modifyDB != nil {
-		f.modifyDB(db, f.dsn)
-	}
-
 	return db, RedactedDSN(f.dsn), nil
 }
 
 func (f *factory) setDSN() error {
+	// --dsn or mysql.dsn (in that order) overrides all
 	if f.cfg.DSN != "" {
 		f.dsn = f.cfg.DSN
 		return nil
@@ -78,10 +70,10 @@ func (f *factory) setDSN() error {
 	// ----------------------------------------------------------------------
 	// my.cnf
 
-	// Set values in cfg finch.ConfigMonitor from values in my.cnf. This does
-	// not overwrite any values in cfg already set. For exmaple, if username
-	// is specified in both, the default my.cnf username is ignored and the
-	// explicit cfg.Username is kept/used.
+	// Set values in cfg from values in my.cnf. This does not overwrite any
+	// values in cfg already set. For exmaple, if username is specified in both,
+	// the default my.cnf username is ignored and the explicit cfg.Username is
+	// kept/used.
 	if f.cfg.MyCnf != "" {
 		finch.Debug("read mycnf %s", f.cfg.MyCnf)
 		def, err := ParseMyCnf(f.cfg.MyCnf)
@@ -101,6 +93,9 @@ func (f *factory) setDSN() error {
 		addr = f.cfg.Socket
 	} else {
 		net = "tcp"
+		if f.cfg.Hostname == "" {
+			f.cfg.Hostname = "127.0.0.1"
+		}
 		addr = f.cfg.Hostname
 	}
 
@@ -149,6 +144,14 @@ func (f *factory) setDSN() error {
 		password = string(bytes)
 	}
 
+	if f.cfg.Username == "" {
+		f.cfg.Username = "finch" // default username
+		finch.Debug("using default MySQL username")
+		if f.cfg.Password == "" && password == "" {
+			finch.Debug("using default MySQL password")
+			password = "amazing"
+		}
+	}
 	cred := f.cfg.Username
 	if password != "" {
 		cred += ":" + password

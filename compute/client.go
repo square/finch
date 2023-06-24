@@ -171,12 +171,8 @@ func (c *Client) run(ctxFinch context.Context) error {
 		}
 	}()
 
-	log.Printf("[%s] Running", stageName)
-	if err := local.Run(ctxRun); err != nil {
-		log.Printf("[%s] Run stopped: %v (lost server:%v stage stopped:%v); sending done signal to server (5s timeout)", stageName, err, lostServer, stageDone)
-	} else {
-		log.Printf("[%s] Completed successfully; sending done signal to server (5s timeout)", stageName)
-	}
+	local.Run(ctxRun)
+	log.Printf("[%s] Run stopped: %v (lost server:%v stage stopped:%v); sending done signal to server (5s timeout)", stageName, err, lostServer, stageDone)
 
 	// Run ack; ok if this fails because we're done, nothing left to sync with server
 	ctxDone, ctxCancel := context.WithTimeout(context.Background(), 5*time.Second)

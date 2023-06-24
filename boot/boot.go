@@ -70,10 +70,19 @@ func Up(env Env) error {
 		os.Exit(0)
 	}()
 
+	// Set up --cpu-profile that's started/stopped in stage just around execution
+	if cmdline.Options.CPUProfile != "" {
+		f, err := os.Create(cmdline.Options.CPUProfile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		finch.CPUProfile = f
+	}
+
 	//  If --client specified, run in client mode connected to a Finch server.
 	// In client mode, we don't need a config file because everything is fetched
 	// from the server.
-	if serverAddr := cmdline.Options.Server; serverAddr != "" {
+	if serverAddr := cmdline.Options.Client; serverAddr != "" {
 		clientName, _ := os.Hostname()
 		client := compute.NewClient(clientName, finch.WithPort(serverAddr, finch.DEFAULT_SERVER_PORT))
 		return client.Run(ctx)
@@ -84,7 +93,7 @@ func Up(env Env) error {
 
 	// Load and validate all stage config files specified on the command line
 	if len(cmdline.Args) == 1 {
-		log.Fatal("No stage file specified. Run finch --help for usage.")
+		log.Fatal("No stage file specified. Run finch --help for usage. See https://square.github.io/finch/ for documentation.")
 	}
 	stages, err := config.Load(
 		cmdline.Args[1:],
@@ -96,6 +105,6 @@ func Up(env Env) error {
 	}
 
 	// Boot and run each stage specified on the command line
-	server := compute.NewServer("local", cmdline.Options.Bind, cmdline.Options.Test)
+	server := compute.NewServer("local", cmdline.Options.Server, cmdline.Options.Test)
 	return server.Run(ctx, stages)
 }

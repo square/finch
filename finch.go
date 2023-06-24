@@ -4,6 +4,7 @@ package finch
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -63,8 +64,9 @@ const (
 )
 
 var (
-	Debugging = false
-	debugLog  = log.New(os.Stderr, "", log.LstdFlags|log.Lmicroseconds)
+	CPUProfile io.Writer // --cpu-profile FILE
+	Debugging  = false
+	debugLog   = log.New(os.Stderr, "", log.LstdFlags|log.Lmicroseconds)
 )
 
 func Debug(msg string, v ...interface{}) {

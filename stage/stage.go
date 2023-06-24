@@ -5,6 +5,7 @@ package stage
 import (
 	"context"
 	"log"
+	"runtime/pprof"
 	"time"
 
 	"github.com/square/finch"
@@ -47,18 +48,17 @@ func (s *Stage) Prepare(ctxFinch context.Context) error {
 	}
 
 	// Test connection to MySQL
-	dbconn.SetFactory(s.cfg.MySQL, nil)
+	dbconn.SetConfig(s.cfg.MySQL)
 	db, dsnRedacted, err := dbconn.Make()
 	if err != nil {
 		return err
 	}
-	defer db.Close()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		return err
 	}
+	db.Close() // test conn
 	log.Printf("Connected to %s", dsnRedacted)
 
 	// Load and validate all config.stage.trx files. This makes and validates all
@@ -98,9 +98,9 @@ func (s *Stage) Prepare(ctxFinch context.Context) error {
 	// Initialize all clients in all exec groups, and register their stats with
 	// the Collector
 	finch.Debug("init clients")
-	for i := range s.execGroups {
-		for j := range s.execGroups[i] {
-			for _, c := range s.execGroups[i][j].Clients {
+	for egNo := range s.execGroups {
+		for cgNo := range s.execGroups[egNo] {
+			for _, c := range s.execGroups[egNo][cgNo].Clients {
 				if err := c.Init(); err != nil {
 					return err
 				}
@@ -114,7 +114,7 @@ func (s *Stage) Prepare(ctxFinch context.Context) error {
 	return nil
 }
 
-func (s *Stage) Run(ctxFinch context.Context) error {
+func (s *Stage) Run(ctxFinch context.Context) {
 	// There are 3 levels of contexts:
 	//
 	//   ctxFinch			from startup.Finch, catches CTRL-C
@@ -140,74 +140,68 @@ func (s *Stage) Run(ctxFinch context.Context) error {
 		s.stats.Start()
 	}
 
-	terminated := false
-EXEC_GROUPS:
-	for i := range s.execGroups {
-		nClients := 0
-		for j := range s.execGroups[i] {
-			log.Printf("[%s] Execution group %d, client group %d, runnning %d clients", s.cfg.Name, i+1, j+1, len(s.execGroups[i][j].Clients))
-			nClients += len(s.execGroups[i][j].Clients)
+	if finch.CPUProfile != nil {
+		pprof.StartCPUProfile(finch.CPUProfile)
+	}
 
-			// See comment block above ctxStage
+	whyDone := "clients completed"
+EXEC_GROUPS:
+	for egNo := range s.execGroups { // ------------------------------------- execution groups
+		nClients := 0
+		for cgNo := range s.execGroups[egNo] { // --------------------------- client groups
+			log.Printf("[%s] Execution group %d, client group %d, runnning %d clients", s.cfg.Name, egNo+1, cgNo+1, len(s.execGroups[egNo][cgNo].Clients))
+			nClients += len(s.execGroups[egNo][cgNo].Clients)
 			var ctxClients context.Context
 			var cancelClients context.CancelFunc
-			if s.execGroups[i][j].Runtime > 0 {
-				finch.Debug("eg %d/%d exec %s", s.execGroups[i][j].Runtime)
-				ctxClients, cancelClients = context.WithDeadline(ctxStage, time.Now().Add(s.execGroups[i][j].Runtime))
+			if s.execGroups[egNo][cgNo].Runtime > 0 {
+				// Client group runtime (plus stage runtime, if any)
+				finch.Debug("eg %d/%d exec %s", s.execGroups[egNo][cgNo].Runtime)
+				ctxClients, cancelClients = context.WithDeadline(ctxStage, time.Now().Add(s.execGroups[egNo][cgNo].Runtime))
 				defer cancelClients()
 			} else {
-				finch.Debug("%d/%d no limit", i, j)
+				// Stage runtime limit, if any
+				finch.Debug("%d/%d no limit", egNo, cgNo)
 				ctxClients = ctxStage
 			}
-
-			// Run all clients from <- client grp (j) <- exec grp (i)
-			for _, c := range s.execGroups[i][j].Clients {
+			for _, c := range s.execGroups[egNo][cgNo].Clients { // --------- clients
 				go c.Run(ctxClients)
 			}
-		}
+		} // start all clients, then...
 
-		for nClients > 0 {
+		for nClients > 0 { // wait for clients
 			select {
 			case c := <-s.doneChan:
 				nClients -= 1
 				if c.Error != nil {
 					log.Printf("[%s] Client %s failed: %v", s.cfg.Name, c.RunLevel.ClientId(), c.Error)
 				} else {
-					if nClients > 0 {
-						log.Printf("[%s] Client done, %d still running", s.cfg.Name, nClients)
-					} else {
-						log.Printf("[%s] Client done", s.cfg.Name)
-					}
+					finch.Debug("client done: %s", c.RunLevel.ClientId())
 				}
 			case <-ctxStage.Done():
-				finch.Debug("runtime elapsed")
+				whyDone = "stage runtime elapsed"
 				break EXEC_GROUPS
 			case <-ctxFinch.Done():
-				finch.Debug("finch terminated")
-				terminated = true
+				whyDone = "Finch terminated"
 				break EXEC_GROUPS
 			}
 		}
 	}
 
-	// Wait for and report final stats if there are stats and it's _not_ the case
-	// that user ternmainted Finch early (CTRL-C) without periodic stats, which
-	// would result in terminating without any stats. Meaning, with stats.freq==0,
-	// we want final on CTRL-C because these will be the only stats. But with
-	// freq > 0, we don't need final stats on CTRL-C because, presumably, user got
-	// some periodic stats already and they're terminating when they've gotten
-	// enough output.
-	if s.stats != nil && !(terminated && s.stats.Freq > 0) {
-		finch.Debug("wait for final stats")
+	if finch.CPUProfile != nil {
+		pprof.StopCPUProfile()
+	}
+
+	if s.stats != nil {
 		s.stats.Stop()
+		finch.Debug("wait for final stats")
 		timeout := time.After(5 * time.Second)
 		select {
 		case <-s.stats.Done():
 		case <-timeout:
-			log.Printf("[%s] Timeout waiting for final stats, forcing final report (some stats might be lost)\n", s.cfg.Name)
 			s.stats.Report()
+			log.Printf("\n[%s] Timeout waiting for final stats, forced final report (some stats might be lost)\n", s.cfg.Name)
 		}
 	}
 
-	return nil
+	log.Printf("[%s] Stage done because %s\n", s.cfg.Name, whyDone)
 }

@@ -449,6 +449,9 @@ type MySQL struct {
 	DisableAutoTLS *bool `yaml:"disable-auto-tls,omitempty"`
 }
 
+// With returns the MySQL config c with defaults from def. It's called in
+// dbconn/factory.setDSN to apply any defaults from MySQL.MyCnf (a my.cnf
+// defaults file), which mimics how MySQL works.
 func (c *MySQL) With(def MySQL) {
 	if c.Database == "" {
 		c.Database = def.Database
@@ -511,11 +514,9 @@ func (c *MySQL) Vars(params map[string]string) error {
 	if err != nil {
 		return err
 	}
-
 	if err := c.TLS.Vars(params); err != nil {
 		return err
 	}
-
 	return nil
 }
 

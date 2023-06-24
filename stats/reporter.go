@@ -13,7 +13,7 @@ import (
 )
 
 var Header = "interval,duration,runtime,clients,QPS,min,%s,max,r_QPS,r_min,%s,r_max,w_QPS,w_min,%s,w_max,TPS,c_min,%s,c_max,errors,compute"
-var Fmt = "%d,%1.f,%d,%d,%d,%d,P,%d,%d,%d,P,%d,%d,%d,P,%d,%d,%d,P,%d,%d,%s"
+var Fmt = "%d,%.1f,%.1f,%d,%d,%d,P,%d,%d,%d,P,%d,%d,%d,P,%d,%d,%d,P,%d,%d,%s"
 
 var DefaultPercentiles = []float64{99.9}
 var DefaultPercentileNames = []string{"P999"}

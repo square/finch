@@ -21,7 +21,7 @@ type Instance struct {
 	Clients  uint              // number of clients
 	Interval uint              // interval number, monotonically incr
 	Seconds  float64           // of interval
-	Runtime  uint              // total elapsed seconds of benchmark
+	Runtime  float64           // total elapsed seconds of benchmark
 	Total    *Stats            // all trx stats combined
 	Trx      map[string]*Stats // per trx stats
 }
@@ -176,7 +176,7 @@ func (c *Collector) Collect() bool {
 
 	// Update total runtime: calculated from c.start, not c.last, and reported
 	// as whole seconds because it's used as X axis of graphs
-	c.local.Runtime = uint(now.Sub(c.start).Seconds())
+	c.local.Runtime = now.Sub(c.start).Seconds()
 
 	// Lock-free swap: each Trx does an atomic pointer swap of its internal
 	// "a" and "b" stats. So if *a.Stats is active now, Swap swaps to *b.Stats

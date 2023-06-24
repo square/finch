@@ -26,7 +26,7 @@ To explain (and for brevity), let's use the same data ID notation that Finch use
 So "@d(1)/trx" is @d, first copy of the generator, trx-scoped.
 
 {{< hint type=tip title="Debug Output" >}}
-Normal Finch output doesn't print data IDs, but you can see them with [`--debug`]({{< relref "command-line/usage#--debug" >}}).
+Normal Finch output doesn't print data IDs, but you can see them with [`--debug`]({{< relref "operate/command-line#--debug" >}}).
 {{< /hint >}}
 
 {{< toc >}}

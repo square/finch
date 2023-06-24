@@ -41,7 +41,7 @@ func NewServer(name, addr string, test bool) *Server {
 		test: test,
 		gds:  data.NewScope(), // global data
 	}
-	if addr != "" && addr != "-" {
+	if addr != "" {
 		s.api = NewAPI(finch.WithPort(addr, finch.DEFAULT_SERVER_PORT))
 	}
 	return s
@@ -126,9 +126,11 @@ func (s *Server) run(ctxFinch context.Context, cfg config.Stage) error {
 	// Wait for the required number instances to boot. If running only local,
 	// this will be instant because local already booted and acked above.
 	// But with remotes, this might take a few milliseconds over the network.
+	if nInstances > 1 {
+		log.Printf("Waiting for %d instances to boot...", nInstances)
+	}
 	booted := uint(0)
 	for booted < nInstances {
-		log.Printf("Have %d instances, need %d", booted, nInstances)
 		select {
 		case ack := <-m.bootChan:
 			if ack.err != nil {
@@ -136,12 +138,15 @@ func (s *Server) run(ctxFinch context.Context, cfg config.Stage) error {
 				continue
 			}
 			booted += 1
-			log.Printf("%s booted", ack.name)
+			if nInstances > 1 {
+				log.Printf("%s booted", ack.name)
+			}
 		case <-ctxFinch.Done():
 			return nil
 		}
 	}
 
+	// Close stage in API to prevent remotes from joining
 	m.Lock()
 	m.booted = true
 	m.Unlock()
@@ -159,23 +164,26 @@ func (s *Server) run(ctxFinch context.Context, cfg config.Stage) error {
 
 	if local != nil { // start local instance
 		go func() {
-			err := local.Run(ctxFinch)
-			m.doneChan <- ack{name: s.name, err: err}
+			local.Run(ctxFinch)
+			m.doneChan <- ack{name: s.name}
 		}()
 	}
 
 	// Wait for instances to finish running
-	done := uint(0)
-	for done < nInstances {
+	running := booted
+	for running > 0 {
 		select {
 		case ack := <-m.doneChan:
-			done += 1
+			running -= 1
 			if ack.err != nil {
 				log.Printf("%s error running stage %s: %s", ack.name, stageName, ack.err)
-			} else {
-				log.Printf("%s completed stage %s", ack.name, stageName)
 			}
-			log.Printf("%d/%d instances running", nInstances-done, nInstances)
+			if nInstances > 1 {
+				log.Printf("%s completed stage %s", ack.name, stageName)
+				if running > 0 {
+					log.Printf("%d/%d instances running", running, nInstances)
+				}
+			}
 		case <-ctxFinch.Done():
 			// Signal remote instances to stop early and (maybe) send finals stats
 			if s.api != nil {
