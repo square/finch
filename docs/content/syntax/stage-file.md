@@ -227,6 +227,15 @@ The `workload` section declares the [workload]({{< relref "benchmark/workload" >
 
 Number of clients to run in client group.
 
+### db
+
+* Default: (none)
+* Value: database name
+
+Deafult client group database.
+See [Operate / MySQL / Default Database]({{< relref "operate/mysql#default-database" >}})
+Makes clients in client group execute `USE db` on prepare.
+
 ### iter
 
 ### iter-clients

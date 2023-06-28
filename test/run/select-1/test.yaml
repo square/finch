@@ -1,0 +1,5 @@
+
+stage:
+  runtime: 1s
+  trx:
+    - file: test.sql

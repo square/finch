@@ -5,9 +5,12 @@ package stats_test
 import (
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/go-test/deep"
 
+	"github.com/square/finch"
+	"github.com/square/finch/config"
 	"github.com/square/finch/stats"
 )
 
@@ -83,6 +86,54 @@ func TestTrxStats(t *testing.T) {
 	if a1 != a2 {
 		t.Errorf("a1 != a2, expected same pointer after second Swap")
 	}
+}
+
+func TestTrxStats_MultiThreaded(t *testing.T) {
+	finch.Debugging = true
+	cfg := config.Stats{
+		Report: map[string]map[string]string{
+			"stdout": {},
+		},
+	}
+	c, err := stats.NewCollector(cfg, "local", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := stats.NewTrx("t1")
+	c.Watch([]*stats.Trx{s})
+
+	c.Start()
+
+	record := make(chan int64, 1)
+	done := make(chan struct{})
+	go func() {
+		for n := range record {
+			s.Record(stats.READ, n)
+		}
+		close(done)
+	}()
+
+	// Starts on a
+	record <- 100
+	record <- 200
+
+	/*
+		b := s.Swap() // a -> b
+		record <- 300
+		record <- 300
+
+		a := s.Swap() // b -> a
+	*/
+	record <- 100
+	close(record)
+	<-done
+
+	time.Sleep(100 * time.Millisecond)
+	c.Stop()
+
+	//	if a == b {
+	//		t.Errorf("a == b, expected different pointers after first Swap")
+	//	}
 }
 
 func TestPecentiles_P9s(t *testing.T) {

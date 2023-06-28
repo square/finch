@@ -59,15 +59,18 @@ func Up(env Env) error {
 	log.Println(finch.SystemParams)
 
 	// Catch CTRL-C and cancel the main context, which should cause a clean shutdown
-	ctx, cancel := context.WithCancel(context.Background())
+	ctxFinch, cancelFinch := context.WithCancel(context.Background())
 	go func() {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, os.Interrupt)
 		<-c
 		log.Println("Caught CTRL-C")
-		cancel()
+		cancelFinch()
+		// Fail-safe: if something doesn't respond to the ctx cancellation,
+		// this guarantees that Finch will terminate on CTRL-C after 7.5s.
 		<-time.After(7500 * time.Millisecond) // 7.5s
-		os.Exit(0)
+		log.Println("Forcing exit(1) because stage did not respond to context cancellation")
+		os.Exit(1)
 	}()
 
 	// Set up --cpu-profile that's started/stopped in stage just around execution
@@ -85,7 +88,7 @@ func Up(env Env) error {
 	if serverAddr := cmdline.Options.Client; serverAddr != "" {
 		clientName, _ := os.Hostname()
 		client := compute.NewClient(clientName, finch.WithPort(serverAddr, finch.DEFAULT_SERVER_PORT))
-		return client.Run(ctx)
+		return client.Run(ctxFinch)
 	}
 
 	// ----------------------------------------------------------------------
@@ -106,5 +109,5 @@ func Up(env Env) error {
 
 	// Boot and run each stage specified on the command line
 	server := compute.NewServer("local", cmdline.Options.Server, cmdline.Options.Test)
-	return server.Run(ctx, stages)
+	return server.Run(ctxFinch, stages)
 }

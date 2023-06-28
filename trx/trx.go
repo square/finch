@@ -480,25 +480,11 @@ func (f *File) column(colNo int, col string) (string, error) {
 		dataCfg = config.Data{
 			Name:      col,
 			Generator: "column",
-			DataType:  "string",
 		}
-		fmt.Printf("No data params for %s (%s line %d), defaulting to string column\n", col, f.cfg.Name, f.lb.n-1)
+		fmt.Printf("No data params for column %s (%s line %d), default to non-quoted value\n", col, f.cfg.Name, f.lb.n-1)
 	}
 
-	// [...].data.col.data-type
-	colType := ""
-	switch dataCfg.DataType {
-	case "numeric":
-		colType = "n"
-	case "string":
-		colType = "s"
-	default:
-		return "", fmt.Errorf("invalid column type: %s: valid types: numeric, string", dataCfg.DataType)
-	}
-	g, err := data.Make("column", col, dataCfg.Scope, map[string]string{
-		"name": col,
-		"type": colType,
-	})
+	g, err := data.Make("column", col, dataCfg.Scope, dataCfg.Params)
 	if err != nil {
 		return "", err
 	}

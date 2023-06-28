@@ -144,9 +144,10 @@ func (s *Stage) Run(ctxFinch context.Context) {
 		pprof.StartCPUProfile(finch.CPUProfile)
 	}
 
-	whyDone := "clients completed"
-EXEC_GROUPS:
 	for egNo := range s.execGroups { // ------------------------------------- execution groups
+		if ctxFinch.Err() != nil {
+			break
+		}
 		nClients := 0
 		for cgNo := range s.execGroups[egNo] { // --------------------------- client groups
 			log.Printf("[%s] Execution group %d, client group %d, runnning %d clients", s.cfg.Name, egNo+1, cgNo+1, len(s.execGroups[egNo][cgNo].Clients))
@@ -168,21 +169,55 @@ EXEC_GROUPS:
 			}
 		} // start all clients, then...
 
+		clientErrors := make([]*client.Client, 0, nClients)
+	CLIENTS:
 		for nClients > 0 { // wait for clients
 			select {
 			case c := <-s.doneChan:
 				nClients -= 1
 				if c.Error != nil {
-					log.Printf("[%s] Client %s failed: %v", s.cfg.Name, c.RunLevel.ClientId(), c.Error)
-				} else {
-					finch.Debug("client done: %s", c.RunLevel.ClientId())
+					clientErrors = append(clientErrors, c)
 				}
+				log.Printf("client %s done: %v", c.RunLevel, c.Error)
 			case <-ctxStage.Done():
-				whyDone = "stage runtime elapsed"
-				break EXEC_GROUPS
+				finch.Debug("stage runtime elapsed")
+				break CLIENTS
 			case <-ctxFinch.Done():
-				whyDone = "Finch terminated"
-				break EXEC_GROUPS
+				finch.Debug("finch terminated")
+				break CLIENTS
+			}
+		}
+		if nClients > 0 {
+			// spinWaitMs gives clients a _little_ time to finish when either
+			// context is cancelled. This must be done to avoid a data race in
+			// stats reporting: the CLIENTS loop finishes and stats are reported
+			// below while a client is still writing to those stats. (This is
+			// also due to fact that stats are lock-free.) So when a context is
+			// cancelled, start sleeping 1ms and decrementing spinWaitMs which
+			// lets this for loop continue (spin) but also timeout quickly.
+			finch.Debug("spin wait for %d clients", nClients)
+			spinWaitMs := 10
+			for spinWaitMs > 0 && nClients > 0 {
+				select {
+				case c := <-s.doneChan:
+					nClients -= 1
+					if c.Error != nil {
+						clientErrors = append(clientErrors, c)
+					}
+				default:
+					log.Println("spin")
+					time.Sleep(1 * time.Millisecond)
+					spinWaitMs -= 1
+				}
+			}
+		}
+		if nClients > 0 {
+			log.Printf("[%s] WARNING: %d clients did not stop, statistics are not accurate", s.cfg.Name, nClients)
+		}
+		if len(clientErrors) > 0 {
+			log.Printf("%d client errors:\n", len(clientErrors))
+			for _, c := range clientErrors {
+				log.Printf("  %s: %v", c.RunLevel.ClientId(), c.Error)
 			}
 		}
 	}
@@ -203,5 +238,5 @@ EXEC_GROUPS:
 		}
 	}
 
-	log.Printf("[%s] Stage done because %s\n", s.cfg.Name, whyDone)
+	log.Printf("[%s] Stage done", s.cfg.Name)
 }

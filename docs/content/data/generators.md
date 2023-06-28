@@ -18,7 +18,11 @@ Random integer between `[min, max]` with uniform or normal distribution
 |`min`|1|v &ge; 0|
 |`max`|100,000|v &lt; 2<sup>64</sup>|
 |`dist`|`uniform`|`uniform` or `normal`|
+|`mean`|(max-min+1)/2||
+|`stddev`|max-min/8.0||
 {.compact .params}
+
+If `dist = normal`, you can shift/scale the distribution by tweaking `mean` and `stddev`.
 
 ### int-gaps
 

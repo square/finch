@@ -17,7 +17,6 @@ import (
 // Int implements the int data generator.
 type Int struct {
 	id     Id `deep:"-"`
-	params map[string]string
 	min    int64
 	max    int64
 	dist   byte    // normal|uniform

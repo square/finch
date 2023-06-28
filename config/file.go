@@ -287,7 +287,6 @@ type Data struct {
 	Name      string            `yaml:"name"`      // @id
 	Generator string            `yaml:"generator"` // data.Generator type
 	Scope     string            `yaml:"scope"`
-	DataType  string            `yaml:"data-type"`
 	Params    map[string]string `yaml:"params"` // Generator-specific params
 }
 
@@ -302,10 +301,6 @@ func (c *Data) Vars(params map[string]string) error {
 		return err
 	}
 	c.Scope, err = Vars(c.Scope, params, false)
-	if err != nil {
-		return err
-	}
-	c.DataType, err = Vars(c.DataType, params, false)
 	if err != nil {
 		return err
 	}
@@ -435,7 +430,7 @@ func (c *ClientGroup) Vars(params map[string]string) error {
 // --------------------------------------------------------------------------
 
 type MySQL struct {
-	Database       string `yaml:"db,omitempty"`
+	Db             string `yaml:"db,omitempty"`
 	DSN            string `yaml:"dsn,omitempty"`
 	Hostname       string `yaml:"hostname,omitempty"`
 	MyCnf          string `yaml:"mycnf,omitempty"`
@@ -453,8 +448,8 @@ type MySQL struct {
 // dbconn/factory.setDSN to apply any defaults from MySQL.MyCnf (a my.cnf
 // defaults file), which mimics how MySQL works.
 func (c *MySQL) With(def MySQL) {
-	if c.Database == "" {
-		c.Database = def.Database
+	if c.Db == "" {
+		c.Db = def.Db
 	}
 	if c.DSN == "" {
 		c.DSN = def.DSN
@@ -486,7 +481,7 @@ func (c *MySQL) With(def MySQL) {
 
 func (c *MySQL) Vars(params map[string]string) error {
 	var err error
-	c.Database, err = Vars(c.Database, params, false)
+	c.Db, err = Vars(c.Db, params, false)
 	if err != nil {
 		return err
 	}

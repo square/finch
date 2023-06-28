@@ -1,11 +1,17 @@
+# https://square.github.io/finch/benchmark/examples/#aurora
 
 stage:
   name: "write-only"
   runtime: 600s
+  # #########################################################################
+  # The distributed compute is a key asspect of this benchmark: the original
+  # 2015 Aurora benchmark was run on four r3.8xlarge EC2 instances, with each
+  # running 1,000 clients.
   compute:
     instances: $params.instances
   workload:
     - clients: $params.clients
+  # #########################################################################
   stats:
     report:
       stdout:

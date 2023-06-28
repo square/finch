@@ -1,5 +1,5 @@
+# https://square.github.io/finch/benchmark/examples/#aurora
 
-# Apply to all stages
 params:
   tables: 250
   rows: 25000

@@ -174,8 +174,7 @@ func (c *Collector) Collect() bool {
 	c.local.Seconds = now.Sub(c.last).Seconds()
 	c.last = now
 
-	// Update total runtime: calculated from c.start, not c.last, and reported
-	// as whole seconds because it's used as X axis of graphs
+	// Update total runtime: calculated from c.start, not c.last
 	c.local.Runtime = now.Sub(c.start).Seconds()
 
 	// Lock-free swap: each Trx does an atomic pointer swap of its internal

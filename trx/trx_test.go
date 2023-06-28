@@ -137,7 +137,9 @@ func TestLoad_003(t *testing.T) {
 			Data: map[string]config.Data{
 				"c": {
 					Generator: "str-not-null",
-					DataType:  "string",
+					Params: map[string]string{
+						"quote-value": "yes",
+					},
 				},
 			},
 		},

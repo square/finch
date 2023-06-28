@@ -1,12 +1,3 @@
-CREATE DATABASE IF NOT EXISTS finch;
-
-USE finch;
-
-DROP TABLE IF EXISTS customers;
-
-DROP TABLE IF EXISTS balances;
-
-DROP TABLE IF EXISTS xfers;
 
 CREATE TABLE customers (
   id		bigint         NOT NULL AUTO_INCREMENT,

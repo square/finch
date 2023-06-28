@@ -1,0 +1,15 @@
+
+stage:
+  stats:
+    disable: true
+  workload:
+    - trx: [setup.sql, run.sql]
+      iter: 1
+  trx:
+    - file: setup.sql
+    - file: run.sql
+      data:
+        y:
+          generator: column
+          params:
+            quote-value: yes

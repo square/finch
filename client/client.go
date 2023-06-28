@@ -5,6 +5,7 @@ package client
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"runtime"
@@ -83,7 +84,7 @@ func (c *Client) Connect(ctx context.Context, cerr error, stmtNo int) error {
 		case 1062: // duplicate key
 			return nil
 		}
-		log.Printf("Client %s connection error: %s (%s)", c.RunLevel.ClientId(), cerr, c.Statements[stmtNo].Query)
+		log.Printf("Client %s error: %s (%s)", c.RunLevel.ClientId(), cerr, c.Statements[stmtNo].Query)
 	}
 
 	// Need to close ps and then re-prep
@@ -162,7 +163,10 @@ func (c *Client) Run(ctxExec context.Context) {
 		if c.conn != nil {
 			c.conn.Close()
 		}
-		c.Error = err
+		// Context cancellation is not an error it's runtime elapsing or CTRL-C
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			c.Error = err
+		}
 		c.DoneChan <- c
 	}()
 

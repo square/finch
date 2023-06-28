@@ -51,9 +51,14 @@ func NewStdout(opts map[string]string) (*Stdout, error) {
 		each:     finch.Bool(opts["each-instance"]),
 		combined: finch.Bool(opts["combined"]),
 	}
-	if r.each == false && r.combined == false {
+
+	_, ok1 := opts["each-instance"]
+	_, ok2 := opts["combined"]
+	if !ok1 && !ok2 { // neither option explicitly configured
+		r.each = true
 		r.combined = true
 	}
+
 	if r.combined {
 		r.all = &Instance{
 			Total: NewStats(),

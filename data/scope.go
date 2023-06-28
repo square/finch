@@ -64,6 +64,9 @@ func (s *Scope) Copy(keyName string, rl finch.RunLevel) Generator {
 		cp = rl.Trx > prev.Trx || rl.Client > prev.Client
 	case finch.SCOPE_CLIENT:
 		cp = rl.Client > prev.Client
+	case finch.SCOPE_GLOBAL:
+		// Used for no-op column
+		return k.Generator
 	default:
 		panic("invalid scope: " + scope) // panic because input already validated
 	}

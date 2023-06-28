@@ -72,18 +72,13 @@ func TestCollector(t *testing.T) {
 			Clients:  1,
 			Interval: 1,
 			Seconds:  5.0,
-			Runtime:  5,
+			Runtime:  5.0,
 			Total:    s1,
 			Trx:      map[string]*stats.Stats{"t1": s1},
 		},
 	}
 
-	// Even using fake times ^, Go returns 5.000000147, but we can safely
-	// ignore those 147 nanoseconds--1ms of precision is enough.
-	if gotStats[0].Seconds < 5.0 || gotStats[0].Seconds > 5.001 {
-		t.Errorf("Stats.Seconds = %f, expected [5.0, 5.001]", gotStats[0].Seconds)
-	}
-	gotStats[0].Seconds = 5.0 // make even 5.0 so deep.Equal works
+	deep.FloatPrecision = 3 // Seconds and Runtime will be like 5.000000368--close enough
 
 	if diff := deep.Equal(gotStats, expectStats); diff != nil {
 		t.Error(diff)

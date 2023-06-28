@@ -4,10 +4,10 @@ weight: 5
 
 |Stat|Type|Unit|Measures|
 |----|----|----|--------|
-|interval|int64|-|Monotonically increasing interval number|
-|duration|int64|seconds|Length of interval|
-|runtime|int64|seconds|Running total runtime (all intervals)|
-|clients|int64|-|Number of clients reporting stats|
+|interval|uint|-|Monotonically increasing interval number|
+|duration|float64|seconds|Length of interval|
+|runtime|float64|seconds|Running total runtime (all intervals)|
+|clients|uint|-|Number of clients reporting stats|
 |QPS|int64|-|Queries per second, all SQL statements|
 |min|int64|microseconds (&micro;s)|Minimum query response time|
 |P999|int64|microseconds (&micro;s)|99.9th [percentile](#percentiles) query response time|
@@ -24,8 +24,9 @@ weight: 5
 |c_min|int64|microseconds (&micro;s)|Minimum `COMMIT` response time|
 |c_P999|int64|microseconds (&micro;s)|99.9th  [percentile](#percentiles) `COMMIT` response time|
 |c_max|int64|microseconds (&micro;s)|Maximum `COMMIT` response time|
-|errors|int64|-|Number of errors caused by query execution|
-|compute|string|-|Compute hostname, or "(N combined)"|
+|errors|uint64|-|Number of errors caused by query execution|
+|N|uint64|-|Number of queries executed (not reported)|
+|compute|string|-|Compute hostname, or "(# combined)"|
 
 ## Percentiles
 
@@ -107,7 +108,7 @@ The stdout reporter dumps stats to stdout in a table:
 
 ```
  interval| duration| runtime| clients|   QPS| min|  P999|    max| r_QPS| r_min| r_P999|  r_max| w_QPS| w_min| w_P999|  w_max|   TPS| c_min| c_P999|  c_max| errors|compute
-        1|       20|      20|       4| 9,461|  80| 1,659| 79,518| 2,365|   148|  1,096| 37,598| 2,365|   184|  1,202| 40,770| 2,365|   366|  2,398| 79,518|      0|local
+        1|     20.0|    20.0|       4| 9,461|  80| 1,659| 79,518| 2,365|   148|  1,096| 37,598| 2,365|   184|  1,202| 40,770| 2,365|   366|  2,398| 79,518|      0|local
 ```
 
 This is the default reporter and output if no [`stats`]({{< relref "syntax/all-file#stats" >}}) are configured.

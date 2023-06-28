@@ -2,9 +2,6 @@
 stage:
   name: xfer
 
-  mysql:
-    dsn: "root@tcp(127.0.0.1:3306)/finch"
-
   # In _all.config, params.customers=1M. These params set the upper and lower
   # bounds of rows accessed. The default is the top 25% (250k) rows because it's
   # common that only a fraction of customers are active.
@@ -31,7 +28,7 @@ stage:
             max: $params.max
         sender_balance_id:
           generator: column
-          data-type: numeric
+          quote-value: no # numeric
 
         # Select a random receiver in the same country
         receiver_id:
@@ -42,14 +39,14 @@ stage:
             max: $params.max
         receiver_balance_id:
           generator: column
-          data-type: numeric
+          quote-value: no # numeric
 
-        # Random text for the fake transfer data.
+        # Random text for the fake transfer data
         x_token:
           generator: xid
         xfer_id:
           generator: column
-          data-type: numeric
+          quote-value: noa # numeric
         c1:
           generator: "str-fill-az"
           params:

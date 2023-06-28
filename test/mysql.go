@@ -1,6 +1,7 @@
 package test
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -30,4 +31,10 @@ func Connection() (string, *sql.DB, error) {
 		return "", nil, err
 	}
 	return dsn, db, nil
+}
+
+func OneRow(db *sql.DB, query string) (string, error) {
+	var s string
+	err := db.QueryRowContext(context.Background(), query).Scan(&s)
+	return s, err
 }

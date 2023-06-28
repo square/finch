@@ -160,7 +160,7 @@ func (f *factory) setDSN() error {
 	// ----------------------------------------------------------------------
 	// Set DSN
 
-	f.dsn = fmt.Sprintf("%s@%s(%s)/", cred, net, addr)
+	f.dsn = fmt.Sprintf("%s@%s(%s)/%s", cred, net, addr, f.cfg.Db)
 	if len(params) > 0 {
 		f.dsn += "?" + strings.Join(params, "&")
 	}
