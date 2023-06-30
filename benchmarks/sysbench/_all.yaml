@@ -28,4 +28,4 @@ params:
 # A stage can override this to turn off stats by setting stage.stats.disable=true,
 # as shown in setup.yaml.
 stats:
-  freq: 2s
+  freq: 5s

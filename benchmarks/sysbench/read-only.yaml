@@ -2,7 +2,7 @@
 
 stage:
   name: read-only
-  runtime: 4s
+  runtime: 60s
   workload:
     - clients: 1
   trx:
