@@ -1,9 +1,8 @@
+# https://square.github.io/finch/benchmark/examples/#sysbench
 
 stage:
   name: read-only
-  runtime: 60s
-  mysql:
-    db: finch
+  runtime: 4s
   workload:
     - clients: 1
   trx:

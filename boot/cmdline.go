@@ -14,6 +14,7 @@ import (
 type Options struct {
 	Client     string `arg:"env:FINCH_CLIENT"`
 	CPUProfile string `arg:"--cpu-profile,env:FINCH_CPU_PROFILE"`
+	Database   string `arg:"-D,--database,env:FINCH_DB"`
 	Debug      bool   `arg:"env:FINCH_DEBUG"`
 	DSN        string `arg:"env:FINCH_DSN"`
 	Help       bool
@@ -53,6 +54,7 @@ func printHelp() {
 		"Options:\n"+
 		"  --client ADDR[:PORT]  Run as client of server at ADDR\n"+
 		"  --cpu-profile FILE    Save CPU profile of stage execution to FILE\n"+
+		"  --database (-D) DB    Default database on connect\n"+
 		"  --debug               Print debug output to stderr\n"+
 		"  --dsn DSN             MySQL DSN (overrides stage files)\n"+
 		"  --help                Print help and exit\n"+

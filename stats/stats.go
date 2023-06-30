@@ -3,10 +3,7 @@
 package stats
 
 import (
-	"fmt"
 	"math"
-	"strconv"
-	"strings"
 	"sync/atomic"
 )
 
@@ -179,31 +176,6 @@ func (s Stats) Percentiles(eventType byte, p []float64) (q []uint64) {
 		}
 	}
 	return // q
-}
-
-func ParsePercentiles(pCSV string) ([]string, []float64, error) {
-	if strings.TrimSpace(pCSV) == "" {
-		return DefaultPercentileNames, DefaultPercentiles, nil
-	}
-	all := strings.Split(pCSV, ",")
-	if len(all) == 0 {
-		return nil, nil, nil
-	}
-	s := []string{}  // name "P99.9"
-	p := []float64{} // value 99.9
-	for _, raw := range all {
-		pStr := strings.TrimLeft(strings.TrimSpace(raw), "Pp") // p99 -> 99
-		f, err := strconv.ParseFloat(pStr, 64)
-		if err != nil {
-			return nil, nil, fmt.Errorf("invalid percentile: %s: %s", pStr, err)
-		}
-		if f < 0.0 || f > 100.0 {
-			return nil, nil, fmt.Errorf("percentile out of range: %s (%f): must be bretween 0 and 100", pStr, f)
-		}
-		s = append(s, "P"+pStr) // 99 -> P99 (string)
-		p = append(p, f)        // 99.0 (float)
-	}
-	return s, p, nil
 }
 
 // --------------------------------------------------------------------------

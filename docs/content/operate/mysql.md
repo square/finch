@@ -39,6 +39,7 @@ There are three ways to set the default database:
 |[Connection](#connection)|[`stage.workload[].db`]({{< relref "syntax/stage-file#db" >}})|`USE db` in a trx|
 
 The connection default database is standard: the database that the client _requires_ when connecting to MySQL.
+It's specified by [`--dsn`]({{< relref "operate/command-line#--dsn" >}}), or by [`--database`]({{< relref "operate/command-line#--database" >}}), or by [`mysql.db`]({{< relref "syntax/all-file#db" >}}).
 If the database doesn't exist, the connection fails with an error:
 
 ```

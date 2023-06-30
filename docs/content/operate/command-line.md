@@ -9,6 +9,7 @@ Usage:
 Options:
   --client ADDR[:PORT]  Run as client of server at ADDR
   --cpu-profile FILE    Save CPU profile of stage execution to FILE
+  --database (-D) DB    Default database on connect
   --debug               Print debug output to stderr
   --dsn DSN             MySQL DSN (overrides stage files)
   --help                Print help and exit
@@ -47,6 +48,18 @@ Save CPU profile of stage execution.
 |-------|-----|-------|-----------|
 |`FINCH_CPU_PROFILE`|FILE||file name|
 {.compact .params}
+
+<br>
+
+### `--database`
+
+|Env Var|Value|Default|Valid Value|
+|-------|-----|-------|-----------|
+|`FINCH_DB`|DB||Database name|
+{.compact .params}
+
+Sets [default database]({{< relref "operate/mysql#default-database" >}}) on connect.
+Does not override [`--dsn`](#--dsn`).
 
 <br>
 

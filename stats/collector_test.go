@@ -52,7 +52,7 @@ func TestCollector(t *testing.T) {
 
 	c.Start()
 	trx1.Record(stats.READ, 210)
-	c.Stop()
+	c.Stop(1 * time.Second)
 
 	if len(gotStats) == 0 {
 		t.Fatal("got zero stats, expected 1")

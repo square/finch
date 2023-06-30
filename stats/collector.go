@@ -5,6 +5,7 @@ package stats
 import (
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/square/finch"
@@ -42,23 +43,25 @@ func (in *Instance) Combine(from []Instance) {
 
 // Collector collects and reports stats from local and remote instances.
 // If config.stats.freq is set, stats are collected/reported at that frequency.
-// Else, they're collected/reported once when the stage finishes.
+// Else, they're collected/reported once when the stage finishes and calls Stop.
 type Collector struct {
 	Freq       time.Duration
 	trx        [][]*Trx   // lock-free trx stats per client
 	stats      [][]*Stats // stats per trx (per client)
 	local      Instance   // local instance stats
-	interval   []Instance // all Instance stats
-	n          uint       // index in interval
 	nInstances uint       // number of instances in interval
-	intervalNo uint       // current interval being filled
 	stopChan   chan struct{}
 	doneChan   chan struct{}
-	start      time.Time // when Start was called
+	start      time.Time // when Start was called, calculates Runtime
 	last       time.Time // when Collect was last called
 	reporters  []Reporter
-	stopped    bool
 	finalChan  chan struct{}
+
+	*sync.Mutex
+	intervalNo uint       // current interval being filled
+	interval   []Instance // all Instance stats
+	n          uint       // index in interval
+	reported   time.Time  // when Report was last called
 }
 
 func NewCollector(cfg config.Stats, hostname string, nInstances uint) (*Collector, error) {
@@ -84,11 +87,8 @@ func NewCollector(cfg config.Stats, hostname string, nInstances uint) (*Collecto
 		reporters:  reporters,
 		intervalNo: 1,
 		finalChan:  make(chan struct{}),
+		Mutex:      &sync.Mutex{},
 	}, nil
-}
-
-func (c *Collector) Done() chan struct{} {
-	return c.finalChan
 }
 
 // Watch all trx stats from one client. This must be called for each Client
@@ -128,6 +128,7 @@ func (c *Collector) Start() {
 			case <-ticker.C:
 				c.Collect()
 			case <-c.stopChan:
+				finch.Debug("stop ticker")
 				close(c.doneChan)
 				ticker.Stop()
 				return
@@ -136,35 +137,130 @@ func (c *Collector) Start() {
 	}()
 }
 
-// Stop stops metrics collect. It's called only once immediately after the stage
-// finishes (in Stage.Run). It stops the goroutine started in Start, if periodic
-// stats are enabled (config.stats.freq > 0).
-func (c *Collector) Stop() {
-	c.stopped = true
-	finch.Debug("stop")
-	if c.Freq > 0 {
-		// Handle reporting race condition. Suppose freq=2s and runtime=2s.
-		// When run ends, either the ticker in that ^ goroutine can exec first
-		// and report the last interval, or closing stopChan can exec first
-		// and close the goroutine, causing last interval not to be reported.
-		// So take intervalNo before and after stopping goroutine. If it
-		// incremented, then we know report() had run; if not, we know that
-		// report() did not run, so we fall through to do final Collect().
-		n0 := c.intervalNo
-		close(c.stopChan) // stop goroutine ^
-		<-c.doneChan      // wait for final report
-		n1 := c.intervalNo
-		if n1 > n0 {
-			finch.Debug("final interval reported")
-			return
+// Stop stops metrics collection, waits for final stats, and prints the final report.
+// It's called once immediately after the stage finishes (in Stage.Run). It stops the
+// goroutine started in Start, if periodic stats are enabled (stats.freq > 0).
+func (c *Collector) Stop(timeout time.Duration) bool {
+	/*
+		This func is necessarily complex because there's a race condition that
+		can't solved with basic synchronization because the problem is related
+		to the ticker in Start. For example, suppose runtime=10s and stats.freq=5s.
+		At 10s, stage.Run is interrupted, waits for clients to stop, and then
+		calls this Stop. Meanwhile, the Start goroutine and ticker ^ are running
+		independently. The problem is: does Stop (here) happen before or after
+		the 2nd tick at 10s ("tick->Collect[2]" in the cases below)? If it happens
+		_before_ Stop stops the ticker with close(stopChan), then good (cases A and C):
+		the final tick was received, which triggered the final report at 10s.
+		But it can also happen that Stop stops the ticker right before the final
+		tick is received (case B), so the final report will be lost unless Stop
+		invokes it. [N] is the goroutine number, call order top to bottom:
+
+		  Case A				Case B				Case C
+		  ------				------				------
+		  Stop[1]				Stop[1]				tick->Collect[2]
+		  tick->Collect[2]		close(stopChan)[1]	Stop[1]
+		  close(stopChan)[1]						close(stopChan)[1]
+
+		  Here's --debug for case C:
+
+			2023/06/30 16:16:11.807782 DEBUG stage.go:183 stage runtime elapsed
+			2023/06/30 16:16:11.807834 DEBUG stage.go:198 spin wait for 1 clients
+			2023/06/30 16:16:11.807862 DEBUG collector.go:260 collect
+			2023/06/30 16:16:11.807864 DEBUG stage.go:203 1(read-only)/e1(dml1)/g1/c1/t0()/q0 done: <nil>
+			2023/06/30 16:16:11.807919 DEBUG collector.go:353 interval 2: complete
+				<...stats reported...>
+			2023/06/30 16:16:11.808993 DEBUG collector.go:131 stop ticker
+			2023/06/30 16:16:11.809021 DEBUG collector.go:214 last report: 29.641µs ago
+			2023/06/30 16:16:11.809038 DEBUG collector.go:217 final report done
+
+		The stage stops, then "collector.go:260 collect" is the call from Start/final tick,
+		then "collector.go:131 stop ticker" happens due to "close(stopChan)[1]" in Stop.
+		Now here's --debug for case B:
+
+			2023/06/30 16:14:05.495255 DEBUG stage.go:183 stage runtime elapsed
+			2023/06/30 16:14:05.495291 DEBUG stage.go:198 spin wait for 1 clients
+			2023/06/30 16:14:05.495330 DEBUG stage.go:203 1(read-only)/e1(dml1)/g1/c1/t0()/q0 done: <nil>
+			2023/06/30 16:14:05.495352 DEBUG collector.go:131 stop ticker
+			2023/06/30 16:14:05.495373 DEBUG collector.go:214 last report: 1.998968824s ago
+			2023/06/30 16:14:05.495384 DEBUG collector.go:220 last periodic collect
+			2023/06/30 16:14:05.495392 DEBUG collector.go:260 collect
+			2023/06/30 16:14:05.495411 DEBUG collector.go:353 interval 2: complete
+
+		Notice "stop ticker" before "collector.go:260 collect": Go executed "close(stopChan)[1]"
+		before the final tick was received, and "last report: 1.998968824s ago" proves it
+		(stats.freq=2s): the final tick was 0.001031176s away (or late).
+
+		This problem exists not only because of random goroutine run ordering,
+		but also because we can't "ask" the ticker if the final tick was received
+		for three reasons: 1) time.Ticker has no "final tick", it just ticks forever,
+		and 2) we can't compute a final tick like numberOfTicks = runtime / freq
+		because runtime might not be set (an iter limitation or CTRL-C can stop the run).
+		The 3rd reason is even tricker...
+
+		So far we've been talking about the local compute instance, so all this happens
+		within a matter of nanoseconds. But with _remote_ compute instances,
+		the final report can be very delayed due to network delays. Before the last tick,
+		we just wait between ticks and report late. But on the last tick, we need to
+		shutdown as quickly as possible but also wait for the last metrics from the
+		remotes. So even after handling cases A-C, we have to loop without a timeout
+		until Report returns true, which means all stats received and reported.
+	*/
+
+	reported := false
+	if c.Freq == 0 {
+		reported = c.Collect() // first/last/only collection
+	} else {
+		close(c.stopChan) // stop goroutine in Start ^
+		<-c.doneChan      // wait for Start to return
+	}
+
+	c.Lock()
+	lastReported := time.Now().Sub(c.reported)
+	c.Unlock()
+	finch.Debug("last report: %s ago", lastReported)
+
+	if reported || lastReported < (c.Freq/2) {
+		finch.Debug("final report done")
+	} else {
+		if c.Freq > 0 {
+			finch.Debug("last periodic collect")
+			if c.Collect() {
+				goto STOP
+			}
+		}
+
+		finch.Debug("waiting %s for final report...", timeout)
+		timeoutC := time.After(timeout)
+	WAIT:
+		for !reported {
+			select {
+			case <-timeoutC:
+				c.Lock()
+				reported = c.Report(true) // true=force
+				c.Unlock()
+				break WAIT
+			default:
+				time.Sleep(100 * time.Millisecond)
+			}
+			c.Lock()
+			reported = c.Report(false)
+			c.Unlock()
 		}
 	}
-	finch.Debug("reporting final interval")
-	c.Collect()
+
+STOP:
+	finch.Debug("stopping reporters")
+	for _, r := range c.reporters {
+		r.Stop()
+	}
+
+	finch.Debug("collector stopped")
+	close(c.finalChan)
+	return reported
 }
 
-// Collect collects stats from all clients. It's called periodically by the
-// goroutine in Start, or once by Stop if periodic stats aren't enabled.
+// Collect collects stats from all local clients. It's called periodically by
+// the goroutine in Start, or once by Stop if periodic stats aren't enabled.
 func (c *Collector) Collect() bool {
 	finch.Debug("collect")
 
@@ -207,19 +303,19 @@ func (c *Collector) Collect() bool {
 		}
 	}
 
-	// "Send" local instance stats to ourself. Think of it like sending the stats
-	// to 127.0.0.1. This abstraction is needed for remote instances reporting
-	// their stats to this instance, which happens when compute/Server.remoteStats
-	// calls Recv, passing remote stats.
-	return c.Recv(c.local)
+	c.Lock()
+	defer c.Unlock()
+	c.interval[c.n] = c.local
+	c.n++
+	return c.Report(false)
 }
 
-// Recv receives stats from one local or remote client. If local, it's called by
-// Collect. If remote, it's called by compute/Server.remoteStats after receiving
-// stats from the remote instance. Stats are reported when the interval is complete
-// (when N stats from N instances have been received); until then, they're buffered.
-func (c *Collector) Recv(in Instance) bool {
+// Recv receives stats from remote compute instances. It's called by
+// compute/Server.remoteStats.
+func (c *Collector) Recv(in Instance) {
 	finch.Debug("recv %+v", in)
+	c.Lock()
+	defer c.Unlock()
 
 	// Is the received interval in the past? This can happen for stats from remote
 	// instances if, for example, there's a really bad network delay. Since the old
@@ -227,46 +323,45 @@ func (c *Collector) Recv(in Instance) bool {
 	// out of order, we just have to drop the old/delayed interval.
 	if in.Interval < c.intervalNo {
 		log.Printf("Discarding past stats: %+v", in)
-		return false
+		return
 	}
 
 	// Reverse of above: is received interval in the future? If yes, then report
 	// the current interval because it must not have filled up (else it would have
 	// reported earlier). This can happen if stats from one or more remote instance
-	// are lost, so the interval doesn't complete. This will report a partial interval.
+	// are return  lost, so the interval doesn't complete. This will report a partial interval.
 	if in.Interval > c.intervalNo {
 		log.Printf("Received next stats interval (%d) before current interval (%d) complete; reporting incomplete current interval; next stats: %+v", in.Interval, c.intervalNo, in)
-		c.Report()
+		c.Report(true) // true=force
 		c.interval[0] = in
 		c.n = 1
-		return true
+		return
 	}
 
 	// Stats in current interval; buffer until we've received all stats
 	c.interval[c.n] = in
 	c.n += 1
-	if c.n < c.nInstances {
-		finch.Debug("have %d of %d", c.n, c.nInstances)
-		return false // wait for more stats in this interval
-	}
-
-	// Received all stats in this interval
-	finch.Debug("interval %d complete", c.intervalNo)
-	c.Report()
-	return true
+	c.Report(false)
 }
 
-func (c *Collector) Report() {
+// Report reports stats when then current interval is completed: when there are
+// stats from all instances (local and remote). Until the interval is complete,
+// Report does nothing and returns false, unless force is true to force reporting
+// an incomplete interval, which happens when Stop(timeout) times out.
+func (c *Collector) Report(force bool) bool {
+	if force {
+		finch.Debug("interval %d: forcing with %d of %d instances", c.intervalNo, c.n, c.nInstances)
+	} else if c.n < c.nInstances {
+		finch.Debug("interval %d: not complete: have %d of %d", c.intervalNo, c.n, c.nInstances)
+		return false // wait for more stats in this interval
+	} else {
+		finch.Debug("interval %d: complete", c.intervalNo)
+	}
 	for _, r := range c.reporters {
 		r.Report(c.interval[0:c.n])
 	}
+	c.reported = time.Now()
 	c.intervalNo += 1
 	c.n = 0
-	if c.stopped {
-		finch.Debug("stopping reporters")
-		for _, r := range c.reporters {
-			r.Stop()
-		}
-		close(c.finalChan)
-	}
+	return true // interval complete and reported
 }

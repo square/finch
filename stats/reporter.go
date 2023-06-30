@@ -4,6 +4,8 @@ package stats
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 
 	h "github.com/dustin/go-humanize"
@@ -91,6 +93,31 @@ func (f factory) Make(name string, opts map[string]string) (Reporter, error) {
 }
 
 // --------------------------------------------------------------------------
+
+func ParsePercentiles(pCSV string) ([]string, []float64, error) {
+	if strings.TrimSpace(pCSV) == "" {
+		return DefaultPercentileNames, DefaultPercentiles, nil
+	}
+	all := strings.Split(pCSV, ",")
+	if len(all) == 0 {
+		return DefaultPercentileNames, DefaultPercentiles, nil
+	}
+	s := []string{}  // name "P99.9"
+	p := []float64{} // value 99.9
+	for _, raw := range all {
+		pStr := strings.TrimLeft(strings.TrimSpace(raw), "Pp") // p99 -> 99
+		f, err := strconv.ParseFloat(pStr, 64)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid percentile: %s: %s", pStr, err)
+		}
+		if f < 0.0 || f > 100.0 {
+			return nil, nil, fmt.Errorf("percentile out of range: %s (%f): must be bretween 0 and 100", pStr, f)
+		}
+		s = append(s, "P"+pStr) // 99 -> P99 (string)
+		p = append(p, f)        // 99.0 (float)
+	}
+	return s, p, nil
+}
 
 // intsToString returns []int{1,2,3} as "1,2,3" to replace P in Fmt.
 func intsToString(n []uint64, sep string, prettyPrint bool) string {

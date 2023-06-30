@@ -1,6 +1,4 @@
 
-DROP TABLE IF EXISTS sbtest1
-
 CREATE TABLE sbtest1 (
   id int NOT NULL AUTO_INCREMENT,
   k int NOT NULL DEFAULT '0',

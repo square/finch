@@ -102,6 +102,7 @@ func Up(env Env) error {
 		cmdline.Args[1:],
 		cmdline.Options.Params,
 		cmdline.Options.DSN,
+		cmdline.Options.Database,
 	)
 	if err != nil {
 		log.Fatal(err)

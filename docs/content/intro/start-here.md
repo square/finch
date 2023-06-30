@@ -30,7 +30,7 @@ ON finch.* TO finch@'%';
 ```
 
 ```sql
-CREATE DATABSASE IF NOT EXISTS finch;
+CREATE DATABASE IF NOT EXISTS finch;
 
 USE finch;
 
@@ -48,16 +48,16 @@ CREATE TABLE t1 (
 
 ### INSERT
 
-Copy-paste each code block into the file name given above each one.
+Copy-paste each code block into the <mark>file name</mark> given above each one.
 
 {{< columns >}}
-_insert-rows.sql_
+<mark>_insert-rows.sql_</mark>
 ```sql
 -- rows: 100,000
 INSERT INTO finch.t1 (id, n, c) VALUES (@id, @n, @c)
 ```
 <---> <!-- magic separator, between columns -->
-_setup.yaml_
+<mark>_setup.yaml_</mark>
 ```yaml
 stage:
   trx:
@@ -76,7 +76,7 @@ stage:
 Run the INSERT benchmark:
 
 ```bash
-./finch --dsn 'finch:amazing@tcp(127.0.0.1)/' setup.yaml
+./finch setup.yaml
 ```
 
 Finch should complete after few seconds with output similar to below (click to expand).
@@ -113,7 +113,7 @@ Finch should complete after few seconds with output similar to below (click to e
  interval| duration| runtime| clients|   QPS| min|  P999|     max| r_QPS| r_min| r_P999| r_max| w_QPS| w_min| w_P999|   w_max| TPS| c_min| c_P999| c_max| errors|compute
         1|     60.8|    60.8|       1| 1,645| 365| 3,019| 192,360|     0|     0|      0|     0| 1,645|   365|  3,019| 192,360|   0|     0|      0|     0|      0|local
 
-2023/06/24 15:59:03.737413 stage.go:206: [setup.yaml] Stage done because clients completed
+2023/06/24 15:59:03.737413 stage.go:206: [setup.yaml] Stage done
 ```
 {{< /expand >}}
 
@@ -167,7 +167,7 @@ stage:
 Run the read-only benchmark:
 
 ```bash
-./finch --dsn 'finch:amazing@tcp(127.0.0.1)/' read-only.yaml
+./finch read-only.yaml
 ```
 
 What kind of QPS and response time stats did you get on your machine?
@@ -227,7 +227,7 @@ SHOW GLOBAL STATUS LIKE 'Innodb_row_lock_waits';
 Then run the slow row-lock benchmark:
 
 ```bash
-./finch --dsn 'finch:amazing@tcp(127.0.0.1)/' row-lock.yaml
+./finch row-lock.yaml
 ```
 
 Once the benchmark completes (in 20s), execute `SHOW GLOBAL STATUS LIKE 'Innodb_row_lock_waits';` on MySQL again.

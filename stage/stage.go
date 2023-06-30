@@ -174,11 +174,11 @@ func (s *Stage) Run(ctxFinch context.Context) {
 		for nClients > 0 { // wait for clients
 			select {
 			case c := <-s.doneChan:
+				finch.Debug("%s done: %v", c.RunLevel, c.Error)
 				nClients -= 1
 				if c.Error != nil {
 					clientErrors = append(clientErrors, c)
 				}
-				log.Printf("client %s done: %v", c.RunLevel, c.Error)
 			case <-ctxStage.Done():
 				finch.Debug("stage runtime elapsed")
 				break CLIENTS
@@ -200,12 +200,12 @@ func (s *Stage) Run(ctxFinch context.Context) {
 			for spinWaitMs > 0 && nClients > 0 {
 				select {
 				case c := <-s.doneChan:
+					finch.Debug("%s done: %v", c.RunLevel, c.Error)
 					nClients -= 1
 					if c.Error != nil {
 						clientErrors = append(clientErrors, c)
 					}
 				default:
-					log.Println("spin")
 					time.Sleep(1 * time.Millisecond)
 					spinWaitMs -= 1
 				}
@@ -227,14 +227,8 @@ func (s *Stage) Run(ctxFinch context.Context) {
 	}
 
 	if s.stats != nil {
-		s.stats.Stop()
-		finch.Debug("wait for final stats")
-		timeout := time.After(5 * time.Second)
-		select {
-		case <-s.stats.Done():
-		case <-timeout:
-			s.stats.Report()
-			log.Printf("\n[%s] Timeout waiting for final stats, forced final report (some stats might be lost)\n", s.cfg.Name)
+		if !s.stats.Stop(3 * time.Second) {
+			log.Printf("\n[%s] Timeout waiting for final statistics, reported values are incomplete", s.cfg.Name)
 		}
 	}
 

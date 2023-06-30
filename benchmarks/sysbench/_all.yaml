@@ -1,3 +1,5 @@
+# https://square.github.io/finch/benchmark/examples/#sysbench
+
 # This base config, _all.yaml, applies to all stages in the same directory.
 # It allows only the following 3 config sections:
 
@@ -6,8 +8,11 @@
 # MySQL usually applies to all stages because there's usually only 1 MySQL instance.
 # But it could differ if, for example, a setup stage inserts rows on a writable
 # source, and then benchmarks are run on a read-only replica.
-mysql:
-  dsn: "root@tcp(127.0.0.1:3306)/sbtest"
+#
+# For consistency with other Finch example benchmarks, though, let's leave this
+# commented out and use the default Finch MySQL username and password.
+#mysql:
+#  dsn: "root@tcp(127.0.0.1:3306)/sbtest"
 
 # __ 02 _____________________________________________________________________
 #
@@ -20,7 +25,7 @@ params:
 # __ 03 _____________________________________________________________________
 #
 # Stats don't normally apply to all stages, but it's show here for demonstration.
-# A stage can override this to turn off stats by setting stats.disable=true,
+# A stage can override this to turn off stats by setting stage.stats.disable=true,
 # as shown in setup.yaml.
 stats:
-  freq: 5s
+  freq: 2s

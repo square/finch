@@ -283,7 +283,7 @@ The client sends its statistics to the server, so you don't have to aggregate th
 ## Data Generators
 
 A _data generator_ is a plugin that generates data for [statements](#statements).
-Data generators are referenced by a user-defined _data key_ like @d.
+Data generators are referenced by user-defined _data keys_ like @d.
 Data keys and generators are two sides of the same coin.
 
 ### Name and Configuration
