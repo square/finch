@@ -37,11 +37,16 @@ type Client struct {
 	QPS              <-chan bool
 	TPS              <-chan bool
 	DoneChan         chan *Client
-	Error            error
+	Error            Error
 	// --
 	ps     []*sql.Stmt
 	values [][]interface{}
 	conn   *sql.Conn
+}
+
+type Error struct {
+	Err         error
+	StatementNo int
 }
 
 type StatementData struct {
@@ -59,6 +64,7 @@ func (c *Client) Init() error {
 			c.values[i] = make([]interface{}, len(s.Inputs))
 		}
 	}
+	c.Error = Error{}
 	return nil
 }
 
@@ -69,7 +75,19 @@ func (c *Client) Connect(ctx context.Context, cerr error, stmtNo int) error {
 
 	// Connect called due to error on query execution?
 	if cerr != nil {
+		// @todo ROLLBACK if in an explicit trx
+
+		if c.Statements[stmtNo].DDL {
+			return fmt.Errorf("DDL: %s", cerr)
+		}
+
 		switch myerr.MySQLErrorCode(cerr) {
+		case 1046: //  no database selected
+			return cerr
+		case 1064: // You have an error in your SQL syntax
+			return cerr
+		case 1146: // table doesn't exist
+			return cerr
 		case 1213: // deadlock; automatic rollback
 			return nil
 		case 1205: // lock wait timeout; no auto rollback (innodb_rollback_on_timeout=OFF by default)
@@ -82,6 +100,7 @@ func (c *Client) Connect(ctx context.Context, cerr error, stmtNo int) error {
 		case 1290, 1836: // read-only
 			return nil
 		case 1062: // duplicate key
+			// @todo option not to ignore; it can mask errors in how benchmark is written
 			return nil
 		}
 		log.Printf("Client %s error: %s (%s)", c.RunLevel.ClientId(), cerr, c.Statements[stmtNo].Query)
@@ -132,7 +151,8 @@ func (c *Client) Connect(ctx context.Context, cerr error, stmtNo int) error {
 		}
 		c.ps[i], err = c.conn.PrepareContext(ctx, s.Query)
 		if err != nil {
-			return fmt.Errorf("Client %s error preparing %s: %v", c.RunLevel.ClientId(), s.Query, err)
+			c.Error.StatementNo = i
+			return fmt.Errorf("prepare: %s", err)
 		}
 
 		// If s.PrepareMulti = 3, it means this ps should be used for 3 statments
@@ -165,7 +185,7 @@ func (c *Client) Run(ctxExec context.Context) {
 		}
 		// Context cancellation is not an error it's runtime elapsing or CTRL-C
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			c.Error = err
+			c.Error.Err = err
 		}
 		c.DoneChan <- c
 	}()
@@ -254,6 +274,10 @@ ITER:
 					goto ERROR
 				}
 				if c.Data[i].Outputs != nil {
+					// @todo what if no row match? This loop won't happen,
+					// and the column generator won't be called, which will
+					// make it return nil later when used as input to another
+					// query.
 					for rows.Next() {
 						if err = rows.Scan(c.Data[i].Outputs...); err != nil {
 							rows.Close()
@@ -304,11 +328,12 @@ ITER:
 			continue // next query
 
 		ERROR:
-			if err = c.Connect(ctxExec, err, i); err != nil {
-				return // unrecoverable error or runtime elapsed (context timeout/cancel)
-			}
-			if c.Stats[trxNo] != nil {
+			if c.Stats[trxNo] != nil && ctxExec.Err() == nil {
 				c.Stats[trxNo].Error(myerr.MySQLErrorCode(err))
+			}
+			if err = c.Connect(ctxExec, err, i); err != nil {
+				c.Error.StatementNo = i
+				return // unrecoverable error or runtime elapsed (context timeout/cancel)
 			}
 			continue ITER // restart after recoverable error (e.g. deadlock, lock timeout)
 

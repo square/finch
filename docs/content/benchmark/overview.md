@@ -168,5 +168,3 @@ finch setup.yaml benchmark.yaml cleanup.yaml
 ```
 
 That runs stage `setup.yaml`, then stage `benchmark.yaml`, then stage `cleanup.yaml`.
-
-This isn't required, but it's a useful if your benchmark uses [data generators]({{< relref "data/generators" >}}) with global scope to share data across stages.

@@ -9,11 +9,9 @@ stage:
     - clients: 2                    #
       name: rows                    #
       trx: [insert-cust-bal.sql]    # exec group "rows"
-      db: finch                     #
     - clients: 2                    #
       name: rows                    #
       trx: [insert-xfers.sql]       #
-      db: finch
 
   trx:
     - file: ./trx/schema.sql
@@ -21,9 +19,10 @@ stage:
       data:
         c_token:
           generator: xid
-          scope: trx # required because c_token is used 4 times per trx
+          scope: trx
         b_token:
           generator: xid
+          scope: value # required to generate 3 different balance tokens in same INSERT statement
         c_c1:
           generator: "str-fill-az"
           params:

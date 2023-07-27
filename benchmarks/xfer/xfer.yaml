@@ -1,52 +1,57 @@
 
 stage:
   name: xfer
-
-  # In _all.config, params.customers=1M. These params set the upper and lower
-  # bounds of rows accessed. The default is the top 25% (250k) rows because it's
-  # common that only a fraction of customers are active.
-  params:
-    min: 500k
-    max: $params.customers
-    active: 20  # percentage of active customers
-
   runtime: 60s
-
   workload:
-    - clients: 1
-      iter: 1
-
+    - clients: $params.clients
   trx:
     - file: ./trx/xfer.sql
       data:
-        # Select a random sender (by customers.id)
+        # Select a random sender
         sender_id:
           generator: "int-gaps"
           params:
             p: $params.active
-            min: $params.min
-            max: $params.max
-        sender_balance_id:
+            min: $params.lower
+            max: $params.upper
+        sender_token:
           generator: column
-          quote-value: no # numeric
-
-        # Select a random receiver in the same country
-        receiver_id:
-          generator: "int-range"
           params:
-            size: 100 # random 100-value range between
-            min: $params.min
-            max: $params.max
-        receiver_balance_id:
+            quote-value: yes
+        country:
           generator: column
-          quote-value: no # numeric
+          params:
+            quote-value: yes
+        sender_balance_token:
+          generator: column
+          params:
+            quote-value: yes
+        sender_balance_id:   # sender_balance_token -> customers.id
+          generator: column
 
-        # Random text for the fake transfer data
+        # Select a random receiver
+        receiver_id:
+          generator: "int-gaps"
+          params:
+            p: $params.active
+            min: $params.lower
+            max: $params.upper
+        receiver_token:
+          generator: column
+          params:
+            quote-value: yes
+        receiver_balance_token:
+          generator: column
+          params:
+            quote-value: yes
+        receiver_balance_id: # receiver_balance_token -> customers.id
+          generator: column
+
+        # Insert and update a transfer record between sender and receiver
         x_token:
           generator: xid
         xfer_id:
           generator: column
-          quote-value: noa # numeric
         c1:
           generator: "str-fill-az"
           params:

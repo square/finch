@@ -33,12 +33,12 @@ type stageFile struct {
 	Stage Stage `yaml:"stage"`
 }
 
-func Load(files []string, kvparams []string, dsn, db string) ([]Stage, error) {
+func Load(stageFiles []string, kvparams []string, dsn, db string) ([]Stage, error) {
 	var err error
 	base := map[string]*Base{}
 	stages := []Stage{}
 
-	// Get and restore current working dir because we chdir to validate stage files
+	// Get and restore current working dir because we chdir to validate stage stageFiles
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -58,7 +58,7 @@ func Load(files []string, kvparams []string, dsn, db string) ([]Stage, error) {
 		params[f[0]] = f[1]
 	}
 
-	for n, fileName := range files {
+	for n, fileName := range stageFiles {
 		// Load base file (_all.yaml) once for the dir, if it exists
 		dir := filepath.Dir(fileName)
 		b, ok := base[dir]
@@ -89,12 +89,18 @@ func Load(files []string, kvparams []string, dsn, db string) ([]Stage, error) {
 		if err != nil {
 			return nil, err
 		}
-		f := &stageFile{Stage: NewStage(fileName, n+1, b)} // Stage from Base (b)
+		f := &stageFile{Stage: Stage{
+			FileName: fileName,
+			N:        uint(n + 1),
+		}}
 		if err := yaml.UnmarshalStrict(bytes, f); err != nil {
 			return nil, fmt.Errorf("cannot decode YAML in %s: %s", fileName, err)
 		}
+		if b != nil {
+			f.Stage.With(b)
+		}
 
-		// --param foo=bar on command line overrides .params in config files
+		// --param foo=bar on command line overrides .params in stage files
 		for k, v := range params {
 			f.Stage.Params[k] = v
 		}

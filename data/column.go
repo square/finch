@@ -49,7 +49,7 @@ func (g *Column) Copy(r finch.RunLevel) Generator {
 }
 
 func (g *Column) Scan(any interface{}) error {
-	// @todo column type won't chance, so maybe sync.Once to set val or bytes
+	// @todo column type won't change, so maybe sync.Once to set val or bytes
 	// will make this more efficient?
 	switch any.(type) {
 	case []byte:

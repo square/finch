@@ -49,6 +49,8 @@ Save CPU profile of stage execution.
 |`FINCH_CPU_PROFILE`|FILE||file name|
 {.compact .params}
 
+For example, `--cpu-profile cpu.prof` then run `go tool pprof -http 127.1:8080 ./finch cpu.prof`.
+
 <br>
 
 ### `--database`

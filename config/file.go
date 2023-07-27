@@ -48,21 +48,17 @@ type Stage struct {
 	Workload []ClientGroup     `yaml:"workload,omitempty"`
 }
 
-func NewStage(fileName string, n int, b *Base) Stage {
-	c := Stage{
-		FileName: fileName,
-		N:        uint(n),
-	}
-	if b == nil {
-		return c
-	}
-
+func (c *Stage) With(b *Base) {
 	// Apply base config to stage before reading stage config file. This means
 	// any base config values are overwritten if set in the stage config file.
 	if len(b.Params) > 0 {
-		c.Params = map[string]string{}
+		if c.Params == nil {
+			c.Params = map[string]string{}
+		}
 		for k, v := range b.Params {
-			c.Params[k] = v
+			if _, ok := c.Params[k]; !ok {
+				c.Params[k] = v
+			}
 		}
 	}
 
@@ -85,8 +81,6 @@ func NewStage(fileName string, n int, b *Base) Stage {
 			}
 		}
 	}
-
-	return c
 }
 
 func (c *Stage) Vars() error {

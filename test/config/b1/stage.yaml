@@ -1,0 +1,7 @@
+
+stage:
+  name: "test"
+  params:
+    foo: "test"
+  trx:
+    - file: trx.sql

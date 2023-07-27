@@ -61,7 +61,7 @@ Multiple tables are not supported, but the [aurora](#aurora) benchmark is the sa
 
 ## xfer
 
-Naïve money transfer (xfer) with three tables and large data set
+Naïve money transfer (xfer) with three tables, millions of rows, and a complex read-write transaction 
 {.tagline}
 
 |Stage|Type|Description|
@@ -69,4 +69,10 @@ Naïve money transfer (xfer) with three tables and large data set
 |setup.yaml|DDL|Create schema and insert rows|
 |xfer.yaml|Standard|Execute read-write transaction|
 
-The xfer benchmark is complex and demonstrates many of the advanced features of Finch.
+The xfer benchmark executes a complex [read-write transaction](https://github.com/square/finch/blob/main/benchmarks/xfer/trx/xfer.sql) on a nontrivial amount of data in three tables:
+
+* `customers`: 1 million rows
+* `balanaces`: 3 million rows (3 per customer)
+* `xfers`: approximately 2.2 million rows (1 GB of data)
+
+By default, the xfer stage executes a client for each CPU core; specify `-p clients=N` to burn less CPU cores.

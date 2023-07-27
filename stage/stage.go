@@ -176,7 +176,7 @@ func (s *Stage) Run(ctxFinch context.Context) {
 			case c := <-s.doneChan:
 				finch.Debug("%s done: %v", c.RunLevel, c.Error)
 				nClients -= 1
-				if c.Error != nil {
+				if c.Error.Err != nil {
 					clientErrors = append(clientErrors, c)
 				}
 			case <-ctxStage.Done():
@@ -202,7 +202,7 @@ func (s *Stage) Run(ctxFinch context.Context) {
 				case c := <-s.doneChan:
 					finch.Debug("%s done: %v", c.RunLevel, c.Error)
 					nClients -= 1
-					if c.Error != nil {
+					if c.Error.Err != nil {
 						clientErrors = append(clientErrors, c)
 					}
 				default:
@@ -217,7 +217,7 @@ func (s *Stage) Run(ctxFinch context.Context) {
 		if len(clientErrors) > 0 {
 			log.Printf("%d client errors:\n", len(clientErrors))
 			for _, c := range clientErrors {
-				log.Printf("  %s: %v", c.RunLevel.ClientId(), c.Error)
+				log.Printf("  %s: %s (%s)", c.RunLevel.ClientId(), c.Error.Err, c.Statements[c.Error.StatementNo].Query)
 			}
 		}
 	}

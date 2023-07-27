@@ -30,7 +30,7 @@ const (
 type Set struct {
 	Order      []string                // trx names in config order
 	Statements map[string][]*Statement // keyed on trx name
-	Meta       map[string]Meta
+	Meta       map[string]Meta         // keyed on trx name
 	Data       *data.Scope
 }
 
@@ -44,6 +44,7 @@ type Statement struct {
 	Begin        bool
 	Commit       bool
 	Write        bool
+	DDL          bool
 	Idle         time.Duration
 	Inputs       []string // data keys (number of values)
 	Outputs      []string // data keys save-results|columns and save-insert-id
@@ -186,7 +187,7 @@ func (f *File) line(line string) error {
 	finch.Debug("line %d: end prev", f.lb.n)
 	s, err := f.statement()
 	if err != nil {
-		return err
+		return fmt.Errorf("error parsing %s at line %d: %s", f.cfg.File, f.lb.n-1, err)
 	}
 	for i := range s {
 		finch.Debug("stmt: %+v", s[i])
@@ -230,7 +231,8 @@ func (f *File) statement() ([]*Statement, error) {
 		s.Write = true
 	case "ALTER", "CREATE", "DROP", "RENAME", "TRUNCATE":
 		finch.Debug("DDL")
-		f.hasDDL = true
+		s.DDL = true    // statement is DDL
+		f.hasDDL = true // trx has DDL
 	}
 
 	// ----------------------------------------------------------------------
@@ -407,7 +409,7 @@ func (f *File) statement() ([]*Statement, error) {
 			} else {
 				dataCfg, ok := f.cfg.Data[strings.TrimPrefix(name, "@")] // config.stage.trx.*.data
 				if !ok {
-					return nil, fmt.Errorf("no params for data name %s", name)
+					return nil, fmt.Errorf("%s not configured: trx file uses %s but this data key is not configured in the stage file", name, name)
 				}
 				finch.Debug("make data generator %s for %s", dataCfg.Generator, name)
 				if multiValue && dataCfg.Scope == "" {

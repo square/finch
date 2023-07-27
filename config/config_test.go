@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/go-test/deep"
+
 	"github.com/square/finch/config"
 )
 
@@ -60,5 +62,43 @@ func TestVars(t *testing.T) {
 				t.Errorf("got '%s', expected '%s'", got, tt.expect)
 			}
 		})
+	}
+}
+
+func TestLoadWithBase(t *testing.T) {
+	stages, err := config.Load([]string{"../test/config/b1/stage.yaml"}, nil, "", "")
+	if err != nil {
+		t.Error(err)
+	}
+	if len(stages) == 0 {
+		t.Fatalf("got 0 stages, expected 1")
+	}
+	expect := config.Stage{
+		N:        1,
+		Name:     "test",
+		FileName: "../test/config/b1/stage.yaml",
+		Compute: config.Compute{
+			Instances: "1",
+		},
+		Params: map[string]string{
+			"foo": "test",
+		},
+		Stats: config.Stats{
+			Freq: "0s",
+			Report: map[string]map[string]string{
+				"stdout": map[string]string{
+					"each-instance": "true",
+				},
+			},
+		},
+		Trx: []config.Trx{
+			{
+				Name: "trx.sql",
+				File: "trx.sql",
+			},
+		},
+	}
+	if diff := deep.Equal(stages[0], expect); diff != nil {
+		t.Error(diff)
 	}
 }

@@ -221,6 +221,7 @@ func (c *Collector) Stop(timeout time.Duration) bool {
 
 	if reported || lastReported < (c.Freq/2) {
 		finch.Debug("final report done")
+		reported = true
 	} else {
 		if c.Freq > 0 {
 			finch.Debug("last periodic collect")

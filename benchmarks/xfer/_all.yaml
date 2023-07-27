@@ -1,6 +1,11 @@
-mysql:
-  dsn: "root@tcp(127.0.0.1:3306)/"
 
 params:
-  customers: 1,000,000 # 3 balances per customer
-  xfers-size: 10KiB    # 1GiB # about 1.89M rows
+  customers: 1,000,000 # + 3 balances per customer (4M rows total)
+  active: 20           # % of customers between lower and upper
+  lower: 500,000       
+  upper: 1,000,000
+  xfers-size: 1GiB  # about 2.3M rows
+  clients: $sys.CPU_CORES # override on command line like "-p clients=2"
+
+stats:
+  freq: 5s

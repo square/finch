@@ -160,7 +160,7 @@ func (a *Allocator) Clients(groups [][]int, withStats bool) ([][]ClientGroup, er
 				return nil, err
 			}
 			db.SetMaxOpenConns(int(nClients))
-			db.SetMaxIdleConns(int(nClients))
+			db.SetMaxIdleConns(0)
 
 			for k := uint(0); k < nClients; k++ { // client
 				runlevel.Client = k + 1
