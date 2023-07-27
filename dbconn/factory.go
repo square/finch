@@ -231,3 +231,12 @@ func RedactedDSN(dsn string) string {
 	return redactedPassword.FormatDSN()
 
 }
+
+// Suppress error messages from Go MySQL driver like "[mysql] 2023/07/27 15:59:30 packets.go:37: unexpected EOF"
+type null struct{}
+
+func (n null) Print(v ...interface{}) {}
+
+func init() {
+	mysql.SetLogger(null{})
+}

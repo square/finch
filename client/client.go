@@ -68,7 +68,7 @@ func (c *Client) Init() error {
 	return nil
 }
 
-func (c *Client) Connect(ctx context.Context, cerr error, stmtNo int) error {
+func (c *Client) Connect(ctx context.Context, cerr error, stmtNo int, trxActive bool) error {
 	if ctx.Err() != nil { // finch terminated (CTRL-C)?
 		return ctx.Err()
 	}
@@ -91,6 +91,7 @@ func (c *Client) Connect(ctx context.Context, cerr error, stmtNo int) error {
 		case 1213: // deadlock; automatic rollback
 			return nil
 		case 1205: // lock wait timeout; no auto rollback (innodb_rollback_on_timeout=OFF by default)
+			finch.Debug("%s: rollback for lock_wait_timeout", c.RunLevel.ClientId())
 			if _, err := c.conn.ExecContext(ctx, "ROLLBACK"); err != nil {
 				return fmt.Errorf("Client %s ROLLBACK after lock_wait_timeout error failed: %v (%s)", c.RunLevel.ClientId(), cerr, c.Statements[stmtNo].Query)
 			}
@@ -98,41 +99,37 @@ func (c *Client) Connect(ctx context.Context, cerr error, stmtNo int) error {
 		case 1317: // query killed
 			return nil
 		case 1290, 1836: // read-only
+			if trxActive {
+				finch.Debug("%s: rollback for read-only", c.RunLevel.ClientId())
+				if _, err := c.conn.ExecContext(ctx, "ROLLBACK"); err != nil {
+					return fmt.Errorf("Client %s ROLLBACK after read-only error failed: %v (%s)", c.RunLevel.ClientId(), cerr, c.Statements[stmtNo].Query)
+				}
+			}
 			return nil
 		case 1062: // duplicate key
 			// @todo option not to ignore; it can mask errors in how benchmark is written
 			return nil
 		}
-		log.Printf("Client %s error: %s (%s)", c.RunLevel.ClientId(), cerr, c.Statements[stmtNo].Query)
+		log.Printf("Client %s reconnect on error: %s (%s)", c.RunLevel.ClientId(), cerr, c.Statements[stmtNo].Query)
 	}
 
-	// Need to close ps and then re-prep
 	if c.conn != nil {
 		c.conn.Close()
+		c.conn = nil
 	}
 
 	var err error
 	t0 := time.Now()
-	i := 0
-	for {
+	for c.conn == nil {
+		time.Sleep(250 * time.Millisecond)
 		if ctx.Err() != nil { // finch terminated (CTRL-C)?
 			return ctx.Err()
 		}
-
-		c.conn, err = c.DB.Conn(ctx)
-		if err == nil {
-			break // success
-		}
-
-		if i%10 == 0 {
-			log.Printf("Client %s error reconnecting: %s (retrying)", c.RunLevel.ClientId(), err)
-		}
-		time.Sleep(500 * time.Millisecond)
-		i += 1
+		c.conn, _ = c.DB.Conn(ctx)
 	}
 
 	if cerr != nil {
-		log.Printf("Client %s reconnected in %s", c.RunLevel.ClientId(), time.Now().Sub(t0))
+		log.Printf("Client %s reconnected in %.1fs", c.RunLevel.ClientId(), time.Now().Sub(t0).Seconds())
 	}
 
 	if c.DefaultDb != "" {
@@ -190,7 +187,7 @@ func (c *Client) Run(ctxExec context.Context) {
 		c.DoneChan <- c
 	}()
 
-	if err = c.Connect(ctxExec, nil, -1); err != nil {
+	if err = c.Connect(ctxExec, nil, -1, false); err != nil {
 		return
 	}
 
@@ -205,6 +202,7 @@ func (c *Client) Run(ctxExec context.Context) {
 	// beginning and end of a finch trx (file). User is expected to make finch
 	// trx boundaries meaningful.
 	trxNo := -1
+	trxActive := false
 
 	//
 	// CRITICAL LOOP: no debug or superfluous function calls
@@ -222,6 +220,7 @@ ITER:
 		}
 		rc[data.ITER] += 1
 		trxNo = -1
+		trxActive = false
 
 		for i := range c.Statements {
 			// Idle time
@@ -236,6 +235,9 @@ ITER:
 			if c.Data[i].TrxBoundary&trx.BEGIN == 1 {
 				rc[data.TRX] += 1
 				trxNo += 1
+				trxActive = true
+			} else if c.Data[i].TrxBoundary&trx.END == 1 {
+				trxActive = false
 			}
 
 			// Generate new data values for this query. A single data generator
@@ -331,7 +333,7 @@ ITER:
 			if c.Stats[trxNo] != nil && ctxExec.Err() == nil {
 				c.Stats[trxNo].Error(myerr.MySQLErrorCode(err))
 			}
-			if err = c.Connect(ctxExec, err, i); err != nil {
+			if err = c.Connect(ctxExec, err, i, trxActive); err != nil {
 				c.Error.StatementNo = i
 				return // unrecoverable error or runtime elapsed (context timeout/cancel)
 			}
