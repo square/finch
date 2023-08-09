@@ -89,9 +89,13 @@ func Load(stageFiles []string, kvparams []string, dsn, db string) ([]Stage, erro
 		if err != nil {
 			return nil, err
 		}
+		absFile, err := filepath.Abs(fileName)
+		if err != nil {
+			return nil, err
+		}
 		f := &stageFile{Stage: Stage{
-			FileName: fileName,
-			N:        uint(n + 1),
+			File: absFile,
+			N:    uint(n + 1),
 		}}
 		if err := yaml.UnmarshalStrict(bytes, f); err != nil {
 			return nil, fmt.Errorf("cannot decode YAML in %s: %s", fileName, err)
@@ -128,6 +132,8 @@ func Load(stageFiles []string, kvparams []string, dsn, db string) ([]Stage, erro
 		}
 		stages = append(stages, f.Stage)
 		finch.Debug("%+v", f.Stage)
+
+		os.Chdir(cwd)
 	}
 	return stages, nil
 }

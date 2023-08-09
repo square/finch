@@ -50,7 +50,7 @@ func NewServer(name, addr string, test bool) *Server {
 func (s *Server) Run(ctxFinch context.Context, stages []config.Stage) error {
 	for _, cfg := range stages {
 		// cd dir of config file so relative file paths in config work
-		if err := os.Chdir(filepath.Dir(cfg.FileName)); err != nil {
+		if err := os.Chdir(filepath.Dir(cfg.File)); err != nil {
 			return err
 		}
 

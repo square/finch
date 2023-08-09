@@ -48,8 +48,8 @@ func Make() (*sql.DB, string, error) {
 		if err := f.setDSN(); err != nil {
 			return nil, "", err
 		}
-		log.Printf("%s\n", RedactedDSN(f.dsn))
 	}
+	finch.Debug("dsn: %s", RedactedDSN(f.dsn))
 
 	// Make new sql.DB (conn pool) for each client group; see the call to
 	// this func in workload/workload.go.

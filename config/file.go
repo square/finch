@@ -33,7 +33,7 @@ func (c *Base) Validate() error {
 type Stage struct {
 	Compute  Compute           `yaml:"compute,omitempty"`
 	Disable  bool              `yaml:"disable"`
-	FileName string            `yaml:"-"`
+	File     string            `yaml:"-"`
 	Id       string            `yaml:"-"`
 	Name     string            `yaml:"name"`
 	MySQL    MySQL             `yaml:"mysql,omitempty"`
@@ -85,6 +85,16 @@ func (c *Stage) With(b *Base) {
 
 func (c *Stage) Vars() error {
 	var err error
+
+	// First interpolate the params before they're used in other config vars
+	for k, v := range c.Params {
+		c.Params[k], err = Vars(v, c.Params, true)
+		if err != nil {
+			return fmt.Errorf("in params: %s", err)
+		}
+	}
+
+	// Interpolate $params.var in other config vars
 	c.Name, err = Vars(c.Name, c.Params, false)
 	if err != nil {
 		return err
@@ -101,7 +111,6 @@ func (c *Stage) Vars() error {
 	if err != nil {
 		return err
 	}
-
 	if err := c.Compute.Vars(c.Params); err != nil {
 		return fmt.Errorf("in compute: %s", err)
 	}
@@ -110,13 +119,6 @@ func (c *Stage) Vars() error {
 	}
 	if err := c.Stats.Vars(c.Params); err != nil {
 		return fmt.Errorf("in stats: %s", err)
-	}
-
-	for k, v := range c.Params {
-		c.Params[k], err = Vars(v, c.Params, true)
-		if err != nil {
-			return fmt.Errorf("in params: %s", err)
-		}
 	}
 	for i := range c.Trx {
 		if err := c.Trx[i].Vars(c.Params); err != nil {
@@ -137,7 +139,7 @@ func (c *Stage) Validate() error {
 	}
 
 	if c.Name == "" {
-		c.Name = filepath.Base(c.FileName)
+		c.Name = filepath.Base(c.File)
 	}
 
 	if len(c.Trx) == 0 {

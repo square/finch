@@ -20,9 +20,13 @@ import (
 	"github.com/square/finch/trx"
 )
 
+var (
+	ConnectTimeout   = 500 * time.Millisecond
+	ConnectRetryWait = 200 * time.Millisecond
+)
+
 // Client executes SQL statements.
 type Client struct {
-	ExecGroup        uint
 	RunLevel         finch.RunLevel
 	Statements       []*trx.Statement
 	Data             []StatementData
@@ -73,72 +77,66 @@ func (c *Client) Connect(ctx context.Context, cerr error, stmtNo int, trxActive 
 		return ctx.Err()
 	}
 
+	silent := false
 	// Connect called due to error on query execution?
 	if cerr != nil {
-		// @todo ROLLBACK if in an explicit trx
-
-		if c.Statements[stmtNo].DDL {
+		errFlags, handled := finch.MySQLErrorHandling[myerr.MySQLErrorCode(cerr)]
+		if c.Statements[stmtNo].DDL && !handled {
 			return fmt.Errorf("DDL: %s", cerr)
 		}
-
-		switch myerr.MySQLErrorCode(cerr) {
-		case 1046: //  no database selected
-			return cerr
-		case 1064: // You have an error in your SQL syntax
-			return cerr
-		case 1146: // table doesn't exist
-			return cerr
-		case 1213: // deadlock; automatic rollback
-			return nil
-		case 1205: // lock wait timeout; no auto rollback (innodb_rollback_on_timeout=OFF by default)
-			finch.Debug("%s: rollback for lock_wait_timeout", c.RunLevel.ClientId())
-			if _, err := c.conn.ExecContext(ctx, "ROLLBACK"); err != nil {
-				return fmt.Errorf("Client %s ROLLBACK after lock_wait_timeout error failed: %v (%s)", c.RunLevel.ClientId(), cerr, c.Statements[stmtNo].Query)
+		if handled {
+			if errFlags&finch.Eabort != 0 {
+				return cerr // stop client
 			}
-			return nil
-		case 1317: // query killed
-			return nil
-		case 1290, 1836: // read-only
-			if trxActive {
-				finch.Debug("%s: rollback for read-only", c.RunLevel.ClientId())
+			if errFlags&finch.Erollback != 0 && trxActive {
+				finch.Debug("%s: rollback", c.RunLevel.ClientId())
 				if _, err := c.conn.ExecContext(ctx, "ROLLBACK"); err != nil {
-					return fmt.Errorf("Client %s ROLLBACK after read-only error failed: %v (%s)", c.RunLevel.ClientId(), cerr, c.Statements[stmtNo].Query)
+					return fmt.Errorf("ROLLBACK failed: %s (on err: %s) (query: %s)", c.RunLevel.ClientId(), err, cerr, c.Statements[stmtNo].Query)
 				}
 			}
-			return nil
-		case 1062: // duplicate key
-			// @todo option not to ignore; it can mask errors in how benchmark is written
-			return nil
+			if errFlags&finch.Econtinue != 0 {
+				return nil // keep conn, next iter, keep executing
+			}
 		}
-		log.Printf("Client %s reconnect on error: %s (%s)", c.RunLevel.ClientId(), cerr, c.Statements[stmtNo].Query)
+		silent = (errFlags&finch.Esilent != 0) // log the error (here and below)? uhandled errors are logged
+		if !silent {
+			log.Printf("Client %s reconnect on error: %s (%s)", c.RunLevel.ClientId(), cerr, c.Statements[stmtNo].Query)
+		}
 	}
 
 	if c.conn != nil {
 		c.conn.Close()
 		c.conn = nil
+		time.Sleep(ConnectRetryWait)
 	}
 
-	var err error
 	t0 := time.Now()
-	for c.conn == nil {
-		time.Sleep(250 * time.Millisecond)
-		if ctx.Err() != nil { // finch terminated (CTRL-C)?
-			return ctx.Err()
+	for ctx.Err() == nil {
+		ctxConn, cancel := context.WithTimeout(ctx, ConnectTimeout)
+		c.conn, _ = c.DB.Conn(ctxConn)
+		cancel()
+		if c.conn != nil {
+			break // success
 		}
-		c.conn, _ = c.DB.Conn(ctx)
+		time.Sleep(ConnectRetryWait)
 	}
 
-	if cerr != nil {
-		log.Printf("Client %s reconnected in %.1fs", c.RunLevel.ClientId(), time.Now().Sub(t0).Seconds())
+	if ctx.Err() != nil { // finch terminated (CTRL-C)?
+		return ctx.Err()
+	}
+
+	if cerr != nil && !silent {
+		log.Printf("Client %s reconnected in %.3fs", c.RunLevel.ClientId(), time.Now().Sub(t0).Seconds())
 	}
 
 	if c.DefaultDb != "" {
-		_, err = c.conn.ExecContext(ctx, "USE `"+c.DefaultDb+"`")
+		_, err := c.conn.ExecContext(ctx, "USE `"+c.DefaultDb+"`")
 		if err != nil {
 			return err
 		}
 	}
 
+	var err error
 	for i, s := range c.Statements {
 		if !s.Prepare {
 			continue
@@ -232,11 +230,11 @@ ITER:
 			// Is this query the start of a new (finch) trx file? This is not
 			// a MySQL trx (either BEGIN or implicit). It marks finch trx scope
 			// "trx" is a trx file in the config assigned to this client.
-			if c.Data[i].TrxBoundary&trx.BEGIN == 1 {
+			if c.Data[i].TrxBoundary&trx.BEGIN != 0 {
 				rc[data.TRX] += 1
 				trxNo += 1
 				trxActive = true
-			} else if c.Data[i].TrxBoundary&trx.END == 1 {
+			} else if c.Data[i].TrxBoundary&trx.END != 0 {
 				trxActive = false
 			}
 

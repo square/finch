@@ -227,7 +227,7 @@ func (s *Stage) Run(ctxFinch context.Context) {
 	}
 
 	if s.stats != nil {
-		if !s.stats.Stop(3 * time.Second) {
+		if !s.stats.Stop(3*time.Second, ctxFinch.Err() != nil) {
 			log.Printf("\n[%s] Timeout waiting for final statistics, reported values are incomplete", s.cfg.Name)
 		}
 	}

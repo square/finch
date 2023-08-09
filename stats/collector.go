@@ -140,7 +140,7 @@ func (c *Collector) Start() {
 // Stop stops metrics collection, waits for final stats, and prints the final report.
 // It's called once immediately after the stage finishes (in Stage.Run). It stops the
 // goroutine started in Start, if periodic stats are enabled (stats.freq > 0).
-func (c *Collector) Stop(timeout time.Duration) bool {
+func (c *Collector) Stop(timeout time.Duration, terminated bool) bool {
 	/*
 		This func is necessarily complex because there's a race condition that
 		can't solved with basic synchronization because the problem is related
@@ -207,15 +207,21 @@ func (c *Collector) Stop(timeout time.Duration) bool {
 	*/
 
 	reported := false
+	var lastReported time.Duration
 	if c.Freq == 0 {
 		reported = c.Collect() // first/last/only collection
 	} else {
 		close(c.stopChan) // stop goroutine in Start ^
 		<-c.doneChan      // wait for Start to return
+		if terminated {
+			//finch.Debug("terminated; not waiting for next report")
+			//reported = true
+			//goto STOP
+		}
 	}
 
 	c.Lock()
-	lastReported := time.Now().Sub(c.reported)
+	lastReported = time.Now().Sub(c.reported)
 	c.Unlock()
 	finch.Debug("last report: %s ago", lastReported)
 
@@ -225,7 +231,8 @@ func (c *Collector) Stop(timeout time.Duration) bool {
 	} else {
 		if c.Freq > 0 {
 			finch.Debug("last periodic collect")
-			if c.Collect() {
+			reported = c.Collect()
+			if reported {
 				goto STOP
 			}
 		}

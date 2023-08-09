@@ -120,3 +120,23 @@ var SystemParams = map[string]string{}
 func init() {
 	SystemParams["CPU_CORES"] = strconv.Itoa(runtime.NumCPU())
 }
+
+const (
+	Ereconnect = 0         // default (set to clear default flags)
+	Eabort     = 1 << iota // stop client
+	Erollback              // execute ROLLBACK if in trx
+	Econtinue              // don't reconnect, continue next iter
+	Esilent                // don't repot error or reconnect
+)
+
+var MySQLErrorHandling = map[uint16]byte{
+	1046: Eabort,                // no database selected
+	1062: Econtinue,             // duplicate key
+	1064: Eabort,                // You have an error in your SQL syntax
+	1146: Eabort,                // table doesn't exist
+	1205: Erollback | Econtinue, // lock wait timeout; no automatic rollback (innodb_rollback_on_timeout=OFF by default)
+	1213: Econtinue,             // deadlock; automatic rollback
+	1290: Erollback | Econtinue, // read-only (server is running with the --read-only option so it cannot execute this statement)
+	1317: Econtinue,             // query killed (Query execution was interrupted)
+	1836: Erollback | Econtinue, // read-only (Running in read-only mode)
+}
