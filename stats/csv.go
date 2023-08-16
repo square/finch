@@ -62,7 +62,7 @@ func (r *CSV) Report(from []Instance) {
 	clients := from[0].Clients
 	for i := range from[1:] {
 		total.Combine(from[1+i].Total)
-		clients += from[1+1].Clients
+		clients += from[1+i].Clients
 	}
 	compute := from[0].Hostname
 	if len(from) > 1 {
