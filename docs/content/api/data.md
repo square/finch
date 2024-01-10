@@ -5,22 +5,22 @@ Implement `data.Generator`:
 
 ```go
 type Generator interface {
-    Copy(finch.RunLevel) Generator
-    Format() string
-    Id() Id
+    Format() (uint, string)
+    Copy() Generator
+    Values(RunCount) []interface{}
     Scan(any interface{}) error
-    Values(ExecCount) []interface{}
+    Name() string
 }
 ```
 
 Your generator does _not_ have to handle data scope.
 When it's called, Finch expects new values.
 
-Implement `data.`Factory` to create your data generator:
+Implement `data.Factory` to create your data generator:
 
 ```go
 type Factory interface {
-    Make(name, dataName, scope string, params map[string]string) (Generator, error)
+    Make(name, dataKey string, params map[string]string) (Generator, error)
 }
 ```
 

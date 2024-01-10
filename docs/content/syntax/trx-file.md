@@ -1,5 +1,5 @@
 ---
-weight: 1
+weight: 2
 ---
 
 Trx files are plain text format with blank lines separating SQL statements.
@@ -262,15 +262,13 @@ INSERT INTO t VALUES (a, @d), (a, @d), (a, @d)
 {{< /columns >}}
 
 
-By default, Finch uses [value data scope]({{< relref "data/scope#value" >}}) for all data keys in a CSV substitution.
-This is almost always correct, but you can override by configuring an explicit data scope&mdash;doing so will produce duplicate values/rows.
+By default, Finch uses [row scope]({{< relref "data/scope#row" >}}) for all data keys in a CSV substitution.
+This is usually correct, but you can override by configuring an explicit data scope&mdash;but doing so might produce duplicate values/rows.
 
-However, if you manually write a multi-row INSERT statement reusing the same data key in the rows/values, then you need to explicitly set value scope for the data keys (unless your intention is to create duplicate rows).
 Finch does not auto-detect manually written multi-row INSERT statements.
+For these, you probably want [statement scope]({{< relref "data/scope#statement" >}}) plus [explicit calls]({{< relref "data/scope#explicit-call" >}}).
 
-{{< hint type=warning >}}
-Explicitly set value scope for data keys in manually written multi-row INSERT statements.
-{{< /hint >}}
-
+{{< hint type=tip >}}
 The fastest way to bulk-insert rows is by combining CSV substitution, [prepare](#prepare), and multiple clients.
 `N = 1000` or more is possible; the limiting factor is MySQL system variable [`max_allowed_packet`](https://dev.mysql.com/doc/refman/en/server-system-variables.html#sysvar_max_allowed_packet).
+{{< /hint >}}

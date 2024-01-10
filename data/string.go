@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package data
 
@@ -7,13 +7,10 @@ import (
 	"math/rand"
 	"strings"
 	"time"
-
-	"github.com/square/finch"
 )
 
 // StrFillAz implemnts the str-fill-az data generator.
 type StrFillAz struct {
-	id  Id
 	len int64
 	src rand.Source
 }
@@ -28,9 +25,8 @@ const (
 	letterIdxMax  = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
 )
 
-func NewStrFillAz(id Id, params map[string]string) (*StrFillAz, error) {
+func NewStrFillAz(params map[string]string) (*StrFillAz, error) {
 	g := &StrFillAz{
-		id:  id,
 		len: 100,
 		src: rand.NewSource(time.Now().UnixNano()),
 	}
@@ -43,13 +39,12 @@ func NewStrFillAz(id Id, params map[string]string) (*StrFillAz, error) {
 	return g, nil
 }
 
-func (g *StrFillAz) Id() Id                     { return g.id }
-func (g *StrFillAz) Format() string             { return "'%s'" }
+func (g *StrFillAz) Name() string               { return "str-fill-az" }
+func (g *StrFillAz) Format() (uint, string)     { return 1, "'%s'" }
 func (g *StrFillAz) Scan(any interface{}) error { return nil }
 
-func (g *StrFillAz) Copy(r finch.RunLevel) Generator {
+func (g *StrFillAz) Copy() Generator {
 	return &StrFillAz{
-		id:  g.id.Copy(r),
 		len: g.len,
 		src: rand.NewSource(time.Now().UnixNano()),
 	}

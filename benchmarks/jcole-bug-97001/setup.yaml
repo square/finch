@@ -1,0 +1,17 @@
+# https://bugs.mysql.com/bug.php?id=97001
+# https://blog.jcole.us/2019/09/30/reconsidering-access-paths-for-index-ordering-a-dangerous-optimization-and-a-fix/
+# https://hackmysql.com/post/infamous-order-by-limit-query-optimizer-bug/
+
+stage:
+  trx:
+    - file: schema.sql
+    - file: insert-rows.sql
+      data:
+        n:
+          generator: auto-inc
+          scope: client-group
+  workload:
+    - trx: [schema.sql]
+    - trx: [insert-rows.sql] # 5k rows/insert 
+      iter-clients: 200      # x 200 inserts = 1,000,000 rows
+      clients: 4

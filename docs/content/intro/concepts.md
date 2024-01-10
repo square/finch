@@ -21,8 +21,9 @@ global
       └──exec group
          └──client group
             └──client
-               └──trx
-                  └──statement
+               └──iter
+                  └──trx
+                     └──statement
 ```
 
 These are called _run levels_ because they determine if, when, and how various aspects of Finch run.
@@ -104,8 +105,8 @@ You can write a benchmark as one large pseudo-transaction (all SQL statements in
 
 ### Client
 
-A _client_ is one MySQL client (connection) that executes all trx assigned to it.
-Since a trx contains statements, a client executes all the statements in all the trx assigned to it.
+A _client_ is one MySQL client (connection) that executes all SQL statements in all  trx assigned to it.
+Each pass through all assigned trx is one _iter_ (iteration).
 
 You can configure Finch to run any number of clients.
 This is typical for benchmarking tools, but Finch has two unique features:
@@ -229,7 +230,7 @@ Every stage has a name: either set by `stage.name` in the file, or defaulting to
 Every stage needs at least one trx, defined by the `stage.trx` list.
 Every stage should have an explicitly defined workload (`stage.workload`), but in some cases Finch can auto-assign the workload.
 
-The rest is various configuration settings for the stage, workload, data generators, and so forth.
+The rest is various configuration settings for the stage, workload, data keys, and so forth.
 
 Finch runs one or more stages _sequentially_ as specified on the command line:
 
@@ -280,11 +281,13 @@ finch --server 10.0.0.1
 The server sends a copy of the stage to the client, so there's nothing to configure on the client.
 The client sends its statistics to the server, so you don't have to aggregate them&mdash;Finch does it automatically.
 
-## Data Generators
+## Data Keys
 
 A _data generator_ is a plugin that generates data for [statements](#statements).
 Data generators are referenced by user-defined _data keys_ like @d.
-Data keys and generators are two sides of the same coin.
+
+"Data key" and "data generator" are synonymous because they're are two sides of the same coin.
+For brevity, "data key" (or just "@d") is used the most.
 
 ### Name and Configuration
 
@@ -322,7 +325,7 @@ Finch ships with [built-in data generators]({{< relref "data/generators" >}}), a
 
 ### Scope
 
-Data generators are scoped to a [run level](#run-levels).
+Data keys are scoped to a [run level](#run-levels).
 To see why data scope is important, consider this transaction:
 
 ```sql
@@ -335,14 +338,23 @@ UPDATE t SET c=c+1 WHERE id = @d
 COMMIT
 ```
 
-The intention is that @d (the value returned by its data generator) is the same for both the `SELECT` and the `UPDATE`.
-If `@d` has statement scope, then it's called once per statement, which means `SELECT @d` and `UPDATE @d` will generate two different values.
-But if `@d` has trx scope, then it's called once per transaction, which satisfies the intention.
+Is `@d` the same or different in those two statements?
+The answer depends on the configured scope of `@d`:
+
+|`@d` Scope|Result|
+|----------|------|
+|statement|Different `@d`: one generator and value for `SELECT @d`, and another generator and value for `UPDATE @d`|
+|trx|Same `@d`: one generator and one value for both|
+
+Since the statements are in the same MySQL transactions, it intent is probably that `@d` is trx scoped so that the value in both statements is the same.
+But Finch supports very complex workloads, so [Data / Scope]({{< relref "data/scope" >}}) ranges from simple to complex.
 
 ### Input/Output
 
-Most data generators output values, but they can also act as inputs to receive values.
-A common example is saving and reusing an insert ID:
+From the statement point of view, most data keys provide input _to a statement_.
+But data keys can also be outputs: a statement provides a value _to a data key_.
+And a data key can be both.
+For example, a data key is used to save the insert ID from a statement (output) and provide to another statement (input):
 
 ```sql
 -- save-insert-id: @d

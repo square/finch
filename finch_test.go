@@ -49,3 +49,34 @@ func TestWithPort(t *testing.T) {
 		})
 	}
 }
+
+func TestRunLevelGreaterThan(t *testing.T) {
+	rl := finch.RunLevel{
+		Stage:       1,
+		ExecGroup:   1,
+		ClientGroup: 1,
+		Client:      1,
+		Trx:         1,
+		Query:       1,
+	}
+
+	prev := rl
+
+	if rl.GreaterThan(prev, finch.SCOPE_STATEMENT) != false {
+		t.Errorf("no change but got true, expecte false")
+	}
+	if rl.GreaterThan(prev, finch.SCOPE_CLIENT) != false {
+		t.Errorf("no change but got true, expecte false")
+	}
+
+	rl.Client += 1 // increase run level
+	if rl.GreaterThan(prev, finch.SCOPE_STATEMENT) != true {
+		t.Errorf("Client changed but got false for STATEMENT")
+	}
+	if rl.GreaterThan(prev, finch.SCOPE_TRX) != true {
+		t.Errorf("Client changed but got false for TRX")
+	}
+	if rl.GreaterThan(prev, finch.SCOPE_ITER) != true {
+		t.Errorf("Client changed but got false for ITER")
+	}
+}

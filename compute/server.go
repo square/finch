@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package compute
 
@@ -54,8 +54,6 @@ func (s *Server) Run(ctxFinch context.Context, stages []config.Stage) error {
 			return err
 		}
 
-		// Boot the stage: prepares everything, connects to MySQL, but doesn't
-		// not execute any queries
 		if err := s.run(ctxFinch, cfg); err != nil {
 			return err
 		}
@@ -102,7 +100,7 @@ func (s *Server) run(ctxFinch context.Context, cfg config.Stage) error {
 		}
 	}
 
-	s.gds.Reset() // keep data from globally-scoped generators; delete the rest
+	s.gds.Reset() // keep data global and stage data, delete the rest
 
 	// Create and boot local instance first because if this doesn't work,
 	// then remotes shouldn't work either because they all boot with the

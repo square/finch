@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package stage
 
@@ -231,6 +231,4 @@ func (s *Stage) Run(ctxFinch context.Context) {
 			log.Printf("\n[%s] Timeout waiting for final statistics, reported values are incomplete", s.cfg.Name)
 		}
 	}
-
-	log.Printf("[%s] Stage done", s.cfg.Name)
 }

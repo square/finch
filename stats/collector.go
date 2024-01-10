@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package stats
 
@@ -25,6 +25,14 @@ type Instance struct {
 	Runtime  float64           // total elapsed seconds of benchmark
 	Total    *Stats            // all trx stats combined
 	Trx      map[string]*Stats // per trx stats
+}
+
+func NewInstance(hostname string) Instance {
+	return Instance{
+		Hostname: hostname,
+		Total:    NewStats(),
+		Trx:      map[string]*Stats{},
+	}
 }
 
 // Combine combines instance stats for the same interval.
@@ -74,14 +82,10 @@ func NewCollector(cfg config.Stats, hostname string, nInstances uint) (*Collecto
 	}
 
 	return &Collector{
-		Freq:     freq,
-		stopChan: make(chan struct{}),
-		doneChan: make(chan struct{}),
-		local: Instance{
-			Hostname: hostname,
-			Total:    NewStats(),
-			Trx:      map[string]*Stats{},
-		},
+		Freq:       freq,
+		stopChan:   make(chan struct{}),
+		doneChan:   make(chan struct{}),
+		local:      NewInstance(hostname),
 		interval:   make([]Instance, nInstances),
 		nInstances: nInstances,
 		reporters:  reporters,
@@ -94,11 +98,27 @@ func NewCollector(cfg config.Stats, hostname string, nInstances uint) (*Collecto
 // Watch all trx stats from one client. This must be called for each Client
 // because it determines what Collect collects.
 func (c *Collector) Watch(trx []*Trx) {
-	c.local.Clients += 1
-	c.trx = append(c.trx, make([]*Trx, len(trx)))
-	c.stats = append(c.stats, make([]*Stats, len(trx)))
-	n := len(c.trx) - 1
+	// Count non-nil client stats, return early if zero. This can happen with
+	// workload[].disable-status=true (stats disabled in client group).
+	n := 0
 	for i := range trx {
+		if trx[i] != nil {
+			n++
+		}
+	}
+	if n == 0 { // client stats disabled
+		return
+	}
+
+	// This client is watching at least 1 set of trx stats
+	c.local.Clients += 1
+	c.trx = append(c.trx, make([]*Trx, n))
+	c.stats = append(c.stats, make([]*Stats, n))
+	n = len(c.trx) - 1
+	for i := range trx {
+		if trx[i] == nil {
+			continue
+		}
 		c.trx[n][i] = trx[i]
 		c.stats[n][i] = nil // fetch value later in report
 		if _, ok := c.local.Trx[trx[i].Name]; !ok {
@@ -270,8 +290,6 @@ STOP:
 // Collect collects stats from all local clients. It's called periodically by
 // the goroutine in Start, or once by Stop if periodic stats aren't enabled.
 func (c *Collector) Collect() bool {
-	finch.Debug("collect")
-
 	// End of this interval
 	now := Now()
 	c.local.Interval += 1
@@ -280,6 +298,8 @@ func (c *Collector) Collect() bool {
 
 	// Update total runtime: calculated from c.start, not c.last
 	c.local.Runtime = now.Sub(c.start).Seconds()
+
+	finch.Debug("collect")
 
 	// Lock-free swap: each Trx does an atomic pointer swap of its internal
 	// "a" and "b" stats. So if *a.Stats is active now, Swap swaps to *b.Stats

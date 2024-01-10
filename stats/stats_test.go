@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package stats_test
 
@@ -129,7 +129,7 @@ func TestTrxStats_MultiThreaded(t *testing.T) {
 	<-done
 
 	time.Sleep(100 * time.Millisecond)
-	c.Stop(1 * time.Second)
+	c.Stop(1*time.Second, false)
 
 	//	if a == b {
 	//		t.Errorf("a == b, expected different pointers after first Swap")

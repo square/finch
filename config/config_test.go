@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/go-test/deep"
@@ -73,10 +74,11 @@ func TestLoadWithBase(t *testing.T) {
 	if len(stages) == 0 {
 		t.Fatalf("got 0 stages, expected 1")
 	}
+	fileName, _ := filepath.Abs("../test/config/b1/stage.yaml")
 	expect := config.Stage{
-		N:        1,
-		Name:     "test",
-		FileName: "../test/config/b1/stage.yaml",
+		N:    1,
+		Name: "test",
+		File: fileName,
 		Compute: config.Compute{
 			Instances: "1",
 		},

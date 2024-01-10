@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package config
 
@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"path/filepath"
+
+	"github.com/square/finch"
 )
 
 // Base represents a base config file: _all.yaml. If it exists, it applies to
@@ -147,6 +149,7 @@ func (c *Stage) Validate() error {
 	}
 
 	// Trx list: must validate before Workload because Workload reference trx by name
+	seen := map[string]string{}
 	for i := range c.Trx {
 		if c.Trx[i].File == "" {
 			return fmt.Errorf("no file specified for trx %d", i+1)
@@ -156,6 +159,37 @@ func (c *Stage) Validate() error {
 		}
 		if c.Trx[i].Name == "" {
 			c.Trx[i].Name = filepath.Base(c.Trx[i].File)
+		}
+
+		for dataKey, data := range c.Trx[i].Data {
+			if data.Generator == "" {
+				return fmt.Errorf("trx[%d].data[%s].generator not set; see https://square.github.io/finch/syntax/stage-file/#dgenerator", i, dataKey)
+			}
+			scope := data.Scope
+			switch scope {
+			case
+				"",
+				finch.SCOPE_GLOBAL,
+				finch.SCOPE_STAGE,
+				finch.SCOPE_WORKLOAD,
+				finch.SCOPE_EXEC_GROUP,
+				finch.SCOPE_CLIENT_GROUP,
+				finch.SCOPE_CLIENT,
+				finch.SCOPE_ITER,
+				finch.SCOPE_TRX,
+				finch.SCOPE_STATEMENT,
+				finch.SCOPE_ROW,
+				finch.SCOPE_VALUE:
+				// ok
+			default:
+				return fmt.Errorf("invalid data scope: trx[%d].data[%s].scope: %s; see https://square.github.io/finch/syntax/stage-file/#dscope", i, dataKey, scope)
+			}
+
+			if prevScope, ok := seen[dataKey]; !ok {
+				seen[dataKey] = scope
+			} else if prevScope != scope {
+				return fmt.Errorf("scope mismatch: %s: %s then %s", dataKey, prevScope, scope)
+			}
 		}
 	}
 
@@ -168,12 +202,12 @@ func (c *Stage) Validate() error {
 			return err
 		}
 
-		if c.Workload[i].Name != "" {
-			if last, ok := names[c.Workload[i].Name]; !ok {
-				names[c.Workload[i].Name] = i
+		if c.Workload[i].Group != "" {
+			if last, ok := names[c.Workload[i].Group]; !ok {
+				names[c.Workload[i].Group] = i
 			} else {
 				if last != i-1 {
-					return fmt.Errorf("duplicate or non-consecutive execution group name: %s: first at %s.workload[%d], then at %s.workoad[%d]; unique group names must consecutive", c.Workload[i].Name, c.Name, last, c.Name, i)
+					return fmt.Errorf("duplicate or non-consecutive execution group name: %s: first at %s.workload[%d], then at %s.workoad[%d]; unique group names must consecutive", c.Workload[i].Group, c.Name, last, c.Name, i)
 				}
 			}
 		}
@@ -314,10 +348,11 @@ func (c *Data) Vars(params map[string]string) error {
 type ClientGroup struct {
 	Clients       string   `yaml:"clients,omitempty"` // uint
 	Db            string   `yaml:"db,omitempty"`
+	DisableStats  bool     `yaml:"disable-stats,omitempty"`
 	Iter          string   `yaml:"iter,omitempty"`            // uint
 	IterClients   string   `yaml:"iter-clients,omitempty"`    // uint
 	IterExecGroup string   `yaml:"iter-exec-group,omitempty"` // uint
-	Name          string   `yaml:"name,omitempty"`
+	Group         string   `yaml:"group,omitempty"`
 	QPS           string   `yaml:"qps,omitempty"`            // uint
 	QPSClients    string   `yaml:"qps-clients,omitempty"`    // uint
 	QPSExecGroup  string   `yaml:"qps-exec-group,omitempty"` // uint
@@ -410,7 +445,7 @@ func (c *ClientGroup) Vars(params map[string]string) error {
 	if err != nil {
 		return err
 	}
-	c.Name, err = Vars(c.Name, params, false)
+	c.Group, err = Vars(c.Group, params, false)
 	if err != nil {
 		return err
 	}

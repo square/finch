@@ -1,0 +1,17 @@
+# https://bugs.mysql.com/bug.php?id=97001
+# https://blog.jcole.us/2019/09/30/reconsidering-access-paths-for-index-ordering-a-dangerous-optimization-and-a-fix/
+# https://hackmysql.com/post/infamous-order-by-limit-query-optimizer-bug/
+
+stage:
+  trx:
+    - file: shift-rows.sql # UPDATE t SET id=id+1000000 WHERE other_id = 555
+    - file: get-1-row.sql
+  workload:
+    - group: shift
+      trx: [shift-rows.sql]
+      iter: 1
+      disable-stats: true
+
+    - group: after
+      trx: [get-1-row.sql]
+      iter: 2

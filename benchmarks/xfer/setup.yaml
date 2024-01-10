@@ -1,16 +1,18 @@
+# https://square.github.io/finch/benchmark/examples/#xfer
+
 stage:
   name: setup
   stats:
     disable: true
   workload:
     - clients: 1                  #
-      name: schema                # exec group "schema"
+      group: schema               # exec group "schema"
       trx: [schema.sql]           #
     - clients: 2                    #
-      name: rows                    #
+      group: rows                   #
       trx: [insert-cust-bal.sql]    # exec group "rows"
     - clients: 2                    #
-      name: rows                    #
+      group: rows                   #
       trx: [insert-xfers.sql]       #
 
   trx:
