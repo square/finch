@@ -5,6 +5,11 @@ weight: 2
 Finch ships with example benchmarks in subdirectory `benchmarks/`.
 As complete working examples that range from simple to complex, they're good study material for learning how to write Finch benchmarks and use Finch features.
 
+A quick run set of commands is included that presumes:
+* Current working directly in repo: `bin/finch/`
+* [Default MySQL user]({{< relref "operate/mysql#user" >}})
+* Database `finch` exists and is empty (no tables)
+
 {{< hint type=note title="Default Database" >}}
 The Finch example benchmarks do not have a default database, and they do not drop schemas or tables.
 Create a database to use&mdash;database `finch` is suggested.
@@ -44,6 +49,22 @@ finch -D finch -p instances=1 -p clients=8 benchmarks/aurora/write-only.yaml
 |read-only.yaml|Standard|Execute single SELECT|
 |row-lock.yaml|Standard|Execute SELECT and UPDATE transaction on 1,000 rows|
 
+Quick run:
+
+```sh
+./finch -D finch ../../benchmarks/intro/setup.yaml 
+# Takes awhile to insert 100,000 rows
+
+./finch -D finch ../../benchmarks/intro/read-only.yaml
+# Runs for 10s
+
+./finch -D finch ../../benchmarks/intro/row-lock.yaml
+# Runs for 20s
+```
+
+Demonstrates very basic Finch benchmarks and other concepts (like [stats output]({{< ref "benchmark/statistics" >}})).
+Queries use `finch.t1` explicitly, so benchmark must use database `finch`.
+
 ## sysbench
 
 sysbench benchmarks recreated in Finch
@@ -54,6 +75,14 @@ sysbench benchmarks recreated in Finch
 |setup.yaml|DDL|Create schema and insert rows|
 |read-only.yaml|Standard|sysbench OLTP read-only benchmark|
 |write-only.yaml|Standard|sysbench OLTP write-only benchmark|
+
+Quick run:
+
+```sh
+./finch -D finch ../../benchmarks/sysbench/setup.yaml 
+
+./finch -D finch ../../benchmarks/sysbench/read-only.yaml
+```
 
 These recreate two of the legendary [sysbench](https://github.com/akopytov/sysbench) OLTP benchmarks: `oltp_read_only.lua` and `oltp_write_only.lua`.
 They use one table name `sbtest1`.

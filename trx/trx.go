@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package trx
 
@@ -26,12 +26,17 @@ const (
 	END   = byte(0x2)
 )
 
-// Set is the complete set of transactions (and statments) for a stage.
+const EXPLICIT_CALL_SUFFIX = "()"
+
+var DataKeyPattern = regexp.MustCompile(`@[\w_-]+(?:\(\))?`)
+var ExplicitCallPattern = regexp.MustCompile(`@[\w_-]+\(\)`)
+
+// Set is the complete set of transactions (and statements) for a stage.
 type Set struct {
 	Order      []string                // trx names in config order
 	Statements map[string][]*Statement // keyed on trx name
 	Meta       map[string]Meta         // keyed on trx name
-	Data       *data.Scope
+	Data       *data.Scope             // keyed on data key (@d)
 }
 
 // Statement is one query in a transaction and all its read-only metadata.
@@ -50,21 +55,28 @@ type Statement struct {
 	Outputs      []string // data keys save-results|columns and save-insert-id
 	InsertId     string   // data key (special output)
 	Limit        limit.Data
+	Calls        []byte
 }
 
 type Meta struct {
 	DDL bool
 }
 
-func Load(trxList []config.Trx, scope *data.Scope, params map[string]string) (*Set, error) {
+// Load loads all trx files and returns a Set representing all parsed trx.
+// This is called from stage.Prepare since a stage comprises all trx.
+// The given data scope comes from compute.Server to handle globally scoped
+// data keys. Params are user-defined from the stage file: stage.params.
+// The stage uses the returned Set for workload allocation based on however
+// stage.workload mixes and matches trx to exec/client groups.
+func Load(trxFiles []config.Trx, scope *data.Scope, params map[string]string) (*Set, error) {
 	set := &Set{
-		Order:      make([]string, 0, len(trxList)),
+		Order:      make([]string, 0, len(trxFiles)),
 		Statements: map[string][]*Statement{},
 		Data:       scope,
 		Meta:       map[string]Meta{},
 	}
-	for i := range trxList {
-		if err := NewFile(trxList[i], set, params).Load(); err != nil {
+	for i := range trxFiles {
+		if err := NewFile(trxFiles[i], set, params).Load(); err != nil {
 			return nil, err
 		}
 	}
@@ -80,16 +92,19 @@ type lineBuf struct {
 	copyNo uint
 }
 
+// File represents and loads one trx file. File.Load is called by the pkg func,
+// trx.Load, which is called by stage.Prepare. Do not call File.Load directly
+// except for testing.
 type File struct {
-	lb      lineBuf
-	set     *Set
-	params  map[string]string
-	cfg     config.Trx
-	colRefs map[string]int
-	dg      map[string]data.Generator
-	stmtNo  uint // 1-indexed in file (not a line number; not an index into stmt)
-	stmt    []*Statement
-	hasDDL  bool
+	cfg    config.Trx        // stage.trx[]
+	set    *Set              // trx set for the stage, what File.Load fills in
+	params map[string]string // stage.params: user-defined value interpolation
+	// --
+	lb      lineBuf        // save lines until a complete statement is read
+	colRefs map[string]int // column ref counts to detect unused ones
+	stmtNo  uint           // 1-indexed in file (not a line number; not an index into stmt)
+	stmts   []*Statement   // all statements in this file
+	hasDDL  bool           // true if any statement is DDL
 }
 
 func NewFile(cfg config.Trx, set *Set, params map[string]string) *File {
@@ -98,9 +113,8 @@ func NewFile(cfg config.Trx, set *Set, params map[string]string) *File {
 		set:     set,
 		params:  params,
 		colRefs: map[string]int{},
-		dg:      map[string]data.Generator{},
 		lb:      lineBuf{mods: []string{}},
-		stmt:    []*Statement{},
+		stmts:   []*Statement{},
 		stmtNo:  0,
 	}
 }
@@ -128,7 +142,7 @@ func (f *File) Load() error {
 		return err
 	}
 
-	if len(f.stmt) == 0 {
+	if len(f.stmts) == 0 {
 		return fmt.Errorf("trx file %s has no statements; at least 1 is required", f.cfg.File)
 	}
 
@@ -148,7 +162,7 @@ func (f *File) Load() error {
 	}
 
 	f.set.Order = append(f.set.Order, f.cfg.Name)
-	f.set.Statements[f.cfg.Name] = f.stmt
+	f.set.Statements[f.cfg.Name] = f.stmts
 	f.set.Meta[f.cfg.Name] = Meta{
 		DDL: f.hasDDL,
 	}
@@ -185,14 +199,14 @@ func (f *File) line(line string) error {
 
 	// End of statement
 	finch.Debug("line %d: end prev", f.lb.n)
-	s, err := f.statement()
+	s, err := f.statements()
 	if err != nil {
 		return fmt.Errorf("error parsing %s at line %d: %s", f.cfg.File, f.lb.n-1, err)
 	}
 	for i := range s {
 		finch.Debug("stmt: %+v", s[i])
 	}
-	f.stmt = append(f.stmt, s...)
+	f.stmts = append(f.stmts, s...)
 
 	f.lb.str = ""
 	f.lb.mods = []string{}
@@ -201,11 +215,10 @@ func (f *File) line(line string) error {
 }
 
 var reKeyVal = regexp.MustCompile(`([\w_-]+)(?:\:\s*(\w+))?`)
-var reData = regexp.MustCompile(`@[\w_-]+`)
 var reCSV = regexp.MustCompile(`\/\*\!csv\s+(\d+)\s+(.+)\*\/`)
 var reFirstWord = regexp.MustCompile(`^(\w+)`)
 
-func (f *File) statement() ([]*Statement, error) {
+func (f *File) statements() ([]*Statement, error) {
 	f.stmtNo++
 	s := &Statement{
 		Trx: f.cfg.Name, // trx name (trx.name or base(trx.file)
@@ -337,7 +350,7 @@ func (f *File) statement() ([]*Statement, error) {
 			for i := 0; i < n; i++ {
 				finch.Debug("copy %d of %d", i+1, n)
 				f.lb.copyNo = uint(i + 1)
-				ms, err := f.statement() // recurse
+				ms, err := f.statements() // recurse
 				if err != nil {
 					return nil, fmt.Errorf("during copy recurse: %s", err)
 				}
@@ -359,9 +372,9 @@ func (f *File) statement() ([]*Statement, error) {
 	query = strings.ReplaceAll(query, finch.COPY_NUMBER, fmt.Sprintf("%d", f.lb.copyNo))
 
 	// ----------------------------------------------------------------------
-	// Expand CSV /*!csv N val*/
+	// Expand CSV /*!csv N template*/
 	// ----------------------------------------------------------------------
-	multiValue := false
+	csvTemplate := ""
 	m := reCSV.FindStringSubmatch(query)
 	if len(m) > 0 {
 		n, err := strconv.ParseInt(m[1], 10, 32)
@@ -369,31 +382,67 @@ func (f *File) statement() ([]*Statement, error) {
 			return nil, fmt.Errorf("invalid number of CSV values in %s: %s", m[0], err)
 		}
 		vals := make([]string, n)
-		val := strings.TrimSpace(m[2])
-		finch.Debug("%dx %s", n, val)
+		csvTemplate = strings.TrimSpace(m[2])
+
+		keys := map[string]bool{}
+		for _, name := range DataKeyPattern.FindAllString(csvTemplate, -1) {
+			// Trim to look up data key in config because @ is not valid YAML.
+			// The @ will be put back later because all other code expects it.
+			name = cfgKey(name)
+			dataCfg, ok := f.cfg.Data[name] // config.stage.trx[].data
+			if !ok {
+				return nil, fmt.Errorf("%s not configured: trx file uses %s but this data key is not configured in the stage file", name, name)
+			}
+
+			// @d in a CSV template defaults to row scope
+			if dataCfg.Scope == "" {
+				dataCfg.Scope = finch.SCOPE_ROW
+				f.cfg.Data[name] = dataCfg
+			}
+
+			// Save row scoped @d in CSV template, ignore other scopes
+			if dataCfg.Scope == finch.SCOPE_ROW {
+				keys["@"+name] = true
+			}
+		}
+
+		// Change first row scoped @d -> @d() so it generates new values per row
+		csvTemplateScoped := RowScope(keys, csvTemplate)
+		finch.Debug("csv %d %s -> %s", n, csvTemplate, csvTemplateScoped)
+
+		// Expand template, e.g. 3 (@d) -> (@d), (@d), (@d)
 		for i := int64(0); i < n; i++ {
-			vals[i] = val
+			vals[i] = csvTemplateScoped
 		}
 		csv := strings.Join(vals, ", ")
 		query = reCSV.ReplaceAllLiteralString(query, csv)
-		multiValue = true
 	}
 
 	// ----------------------------------------------------------------------
 	// Data keys: @d -> data.Generator
 	// ----------------------------------------------------------------------
-	dataKeys := reData.FindAllString(query, -1)
+	dataKeys := DataKeyPattern.FindAllString(query, -1)
 	finch.Debug("data keys: %v", dataKeys)
 	if len(dataKeys) == 0 {
 		s.Query = query
 		return []*Statement{s}, nil // no data key, return early
 	}
 	s.Inputs = dataKeys
+
+	s.Calls = Calls(s.Inputs)
+	query = ExplicitCallPattern.ReplaceAllStringFunc(query, func(s string) string {
+		return strings.TrimSuffix(s, EXPLICIT_CALL_SUFFIX)
+	})
+
 	dataFormats := map[string]string{} // keyed on data name
 	for i, name := range s.Inputs {
+		// Remove () from @d()
+		name = strings.TrimSuffix(name, EXPLICIT_CALL_SUFFIX)
+		s.Inputs[i] = name
 
 		var g data.Generator
 		var err error
+
 		if k, ok := f.set.Data.Keys[name]; ok && k.Column >= 0 {
 			f.colRefs[name]++
 			g = k.Generator
@@ -401,21 +450,34 @@ func (f *File) statement() ([]*Statement, error) {
 			if i == 0 {
 				return nil, fmt.Errorf("no @PREV data generator")
 			}
-			g = f.set.Data.Keys[dataKeys[i-1]].Generator
-			finch.Debug("@PREV = %s: %s", dataKeys[i-1], g.Id())
+			for p := i - 1; p >= 0; p-- {
+				finch.Debug("%s <- %s", dataKeys[p], dataKeys[i])
+				if dataKeys[p] == "@PREV" {
+					continue
+				}
+				g = f.set.Data.Keys[dataKeys[p]].Generator
+				break
+			}
 		} else {
 			if k, ok = f.set.Data.Keys[name]; ok {
 				g = k.Generator
 			} else {
-				dataCfg, ok := f.cfg.Data[strings.TrimPrefix(name, "@")] // config.stage.trx.*.data
+				dataCfg, ok := f.cfg.Data[cfgKey(name)] // config.stage.trx[].data
 				if !ok {
 					return nil, fmt.Errorf("%s not configured: trx file uses %s but this data key is not configured in the stage file", name, name)
 				}
-				finch.Debug("make data generator %s for %s", dataCfg.Generator, name)
-				if multiValue && dataCfg.Scope == "" {
-					dataCfg.Scope = finch.SCOPE_VALUE
+				finch.Debug("make data generator: %s %s scope: %s", dataCfg.Generator, name, dataCfg.Scope)
+
+				if dataCfg.Scope == "" {
+					dataCfg.Scope = finch.SCOPE_STATEMENT
+					f.cfg.Data[name] = dataCfg
 				}
-				g, err = data.Make(dataCfg.Generator, name, dataCfg.Scope, dataCfg.Params)
+
+				g, err = data.Make(
+					dataCfg.Generator, // e.g. "auto-inc"
+					name,              // @d
+					dataCfg.Params,    // trx[].data.params, generator-specific
+				)
 				if err != nil {
 					return nil, err
 				}
@@ -425,6 +487,7 @@ func (f *File) statement() ([]*Statement, error) {
 					Line:      f.lb.n - 1,
 					Statement: f.stmtNo,
 					Column:    -1,
+					Scope:     dataCfg.Scope,
 					Generator: g,
 				}
 				finch.Debug("%#v", k)
@@ -434,7 +497,7 @@ func (f *File) statement() ([]*Statement, error) {
 		if s.Prepare {
 			dataFormats[name] = "?"
 		} else {
-			dataFormats[name] = g.Format()
+			_, dataFormats[name] = g.Format()
 		}
 	}
 
@@ -448,6 +511,7 @@ func (f *File) statement() ([]*Statement, error) {
 	finch.Debug("replacements: %v", replacements)
 	r := strings.NewReplacer(replacements...)
 	s.Query = r.Replace(query)
+
 	// Caller debug prints full Statement
 	return []*Statement{s}, nil
 }
@@ -465,6 +529,7 @@ func (f *File) column(colNo int, col string) (string, error) {
 				Line:      f.lb.n - 1,
 				Statement: f.stmtNo,
 				Column:    colNo,
+				Scope:     finch.SCOPE_GLOBAL,
 				Generator: data.Noop,
 			}
 			finch.Debug("%#v", f.set.Data.Keys[finch.NOOP_COLUMN])
@@ -477,16 +542,17 @@ func (f *File) column(colNo int, col string) (string, error) {
 		return "", fmt.Errorf("duplicated saved column: %s (first use: %s)", col, k)
 	}
 
-	dataCfg, ok := f.cfg.Data[strings.TrimPrefix(col, "@")] // config.stage.trx.*.data
+	dataCfg, ok := f.cfg.Data[cfgKey(col)] // config.stage.trx.*.data
 	if !ok {
 		dataCfg = config.Data{
 			Name:      col,
 			Generator: "column",
+			Scope:     finch.SCOPE_TRX,
 		}
 		fmt.Printf("No data params for column %s (%s line %d), default to non-quoted value\n", col, f.cfg.Name, f.lb.n-1)
 	}
 
-	g, err := data.Make("column", col, dataCfg.Scope, dataCfg.Params)
+	g, err := data.Make("column", col, dataCfg.Params)
 	if err != nil {
 		return "", err
 	}
@@ -497,8 +563,47 @@ func (f *File) column(colNo int, col string) (string, error) {
 		Line:      f.lb.n - 1,
 		Statement: f.stmtNo,
 		Column:    colNo,
+		Scope:     dataCfg.Scope,
 		Generator: g,
 	}
 	finch.Debug("%#v", f.set.Data.Keys[col])
 	return col, nil
+}
+
+func Calls(dataKeys []string) []byte {
+	calls := make([]byte, len(dataKeys))
+	for i, name := range dataKeys {
+		if strings.HasSuffix(name, EXPLICIT_CALL_SUFFIX) {
+			calls[i] = 1
+		}
+	}
+	finch.Debug("calls: %v", calls)
+	return calls
+}
+
+// RowScope changes every first occurrence of the keys from @d to @d()
+// in csvTemplate. So "(@d, @d)" -> "(@d(), @d)". The explicit call @d()
+// makes @d row scoped because each row will call @d again. This is called
+// when the /*!csv N template */ is being processed (see reCSV).
+func RowScope(keys map[string]bool, csvTemplate string) string {
+	csvDataKeys := DataKeyPattern.FindAllString(csvTemplate, -1)
+KEY:
+	for dataKey := range keys { // row scoped keys
+		for _, k := range csvDataKeys { // all keys in csvTemplate
+			if !strings.HasPrefix(k, dataKey) {
+				continue // not the row scoped key we're looking for
+			}
+			// This is first occurrence of row scoped key in csvTemplate.
+			// Add () suffix if not already set.
+			if !strings.HasSuffix(k, EXPLICIT_CALL_SUFFIX) {
+				csvTemplate = strings.Replace(csvTemplate, k, k+EXPLICIT_CALL_SUFFIX, 1) // 1=only first occurrence
+			}
+			continue KEY // only check/change first occurrence, so this row scoped key is done
+		}
+	}
+	return csvTemplate
+}
+
+func cfgKey(s string) string {
+	return strings.Trim(s, "@"+EXPLICIT_CALL_SUFFIX)
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package data
 
@@ -12,7 +12,6 @@ import (
 // Column is a special Generator that is used to save (Scan) values from rows
 // or insert ID, then return those values (Value) to other statements.
 type Column struct {
-	id         Id
 	quoteValue bool
 	val        interface{}
 	bytes      *bytes.Buffer
@@ -22,28 +21,23 @@ type Column struct {
 var _ Generator = &Column{}
 var _ sql.Scanner = &Column{}
 
-func NewColumn(id Id, params map[string]string) *Column {
-	if id.Scope == "" {
-		id.Scope = finch.SCOPE_TRX // default if not set explicitly
-	}
+func NewColumn(params map[string]string) *Column {
 	return &Column{
-		id:         id,
 		quoteValue: finch.Bool(params["quote-value"]),
 	}
 }
 
-func (g *Column) Id() Id { return g.id }
+func (g *Column) Name() string { return "column" }
 
-func (g *Column) Format() string {
+func (g *Column) Format() (uint, string) {
 	if g.quoteValue {
-		return "'%v'"
+		return 1, "'%v'"
 	}
-	return "%v"
+	return 1, "%v"
 }
 
-func (g *Column) Copy(r finch.RunLevel) Generator {
+func (g *Column) Copy() Generator {
 	return &Column{
-		id:         g.id.Copy(r),
 		quoteValue: g.quoteValue,
 	}
 }
@@ -82,14 +76,8 @@ type noop struct{}
 var _ Generator = Noop
 var _ sql.Scanner = Noop
 
-func (g noop) Id() Id {
-	return Id{
-		Scope: finch.SCOPE_GLOBAL,
-		Type:  "no-op",
-	}
-}
-
-func (g noop) Format() string                  { return "" }
-func (g noop) Copy(r finch.RunLevel) Generator { return Noop }
+func (g noop) Name() string                    { return "no-op" }
+func (g noop) Format() (uint, string)          { return 0, "" }
+func (g noop) Copy() Generator                 { return Noop }
 func (g noop) Values(_ RunCount) []interface{} { return nil }
 func (g noop) Scan(any interface{}) error      { return nil }

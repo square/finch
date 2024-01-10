@@ -10,13 +10,11 @@ stage:
       data:
         id:
           generator: "int"
-          scope: client
           params:
             max: $params.rows
             dist: normal
         id_100:
           generator: "int-range"
-          scope: client
           params:
             range: 100
             max: $params.rows

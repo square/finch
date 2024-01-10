@@ -1,5 +1,8 @@
+# https://square.github.io/finch/benchmark/examples/#intro
+
 stage:
   trx:
+    - file: schema.sql
     - file: insert-rows.sql
       data:
         id:

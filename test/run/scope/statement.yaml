@@ -1,0 +1,32 @@
+stage:
+  name: test
+  trx:
+    - file: 001.sql
+      data:
+        a:
+          scope: statement
+          generator: auto-inc
+        r:
+          scope: statement
+          generator: int
+          params:
+            dist: uniform
+            max: 1,000,000
+        clientid:
+          scope: statement
+          generator: client-id
+          params:
+            ids: exec-group,client-group,client,iter,trx,statement
+    - file: 002.sql
+      # Same data keys as 001.sql
+  workload:
+    # ###### Exec group __A__ #####
+    - group: __A__
+      clients: 1
+      iter: 2
+    - group: __A__
+      clients: 1
+      iter: 1
+    - group: __B__
+      clients: 1
+      iter: 1

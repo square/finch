@@ -46,7 +46,7 @@ stage:
     - file: read.sql
       data:
         d:                   # @d
-          generator: ing
+          generator: int
         id:                  # @id
           generator: int
           params:
@@ -74,11 +74,11 @@ SELECT c FROM t WHERE id = @id
 UPDATE t SET n=n+1 WHERE id = @id
 ```
 
-This works because the default data scope is statement: Finch creates one data generator for @id in the `SELECT`, and another for @id in the `UPDATE`.
-However, there are two important points to consider:
+This works because the default [data scope]({{< relref "data/scope" >}}) is statement: Finch creates one data generator for @id in the `SELECT`, and another for @id in the `UPDATE`.
+However, there are two important points:
 
 * @id in both statements will have the same configuration because they'll be the same map key ("id") in [`stage.trx[].data`]({{< relref "syntax/stage-file#data" >}})&mdash;same name, same configuration.
-* _[Data scope]({{< relref "data/scope" >}})_ determines if the two @id are different or the same, and "when": if they're different, when do they generate different values?
+* [Data scope]({{< relref "data/scope" >}}) determines if the two @id are different or the same and when each is called to generate a new data value.
 
 {{< hint type=warning title="Data Scope" >}}
 Be sure to read [Data / Scope]({{< relref "data/scope" >}}) to fully understand the second point.
@@ -120,5 +120,5 @@ stage:
           generator: int-range
 ```
 
-The [int-range generator]({{< relref "data/generators#int-range" >}}) returns two values (an ordered pair): the first value repalced @d, the second value replaces @PREV.
+The [int-range generator]({{< relref "data/generators#int-range" >}}) returns two values (an ordered pair): the first value replaced @d, the second value replaces @PREV.
 

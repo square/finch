@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package data_test
 
@@ -12,7 +12,7 @@ import (
 
 func TestScope_Trx(t *testing.T) {
 	keyName := "@d"
-	g, _ := data.NewAutoInc(data.Id{Type: "auto-inc", DataKey: keyName, Scope: finch.SCOPE_TRX}, nil)
+	g, _ := data.NewAutoInc(nil)
 
 	r := finch.RunLevel{
 		Stage:         1,
@@ -29,6 +29,7 @@ func TestScope_Trx(t *testing.T) {
 	scope := data.NewScope()
 	scope.Keys[keyName] = data.Key{
 		Name:      keyName,
+		Scope:     finch.SCOPE_TRX,
 		Trx:       "test-trx",
 		Statement: 1,
 		Column:    -1,
@@ -117,7 +118,7 @@ func TestScope_PREV(t *testing.T) {
 	// @PREV should return nil to signal "skip it; previous data gen will
 	// return multiple values."
 	keyName := "@d"
-	g, _ := data.NewAutoInc(data.Id{Type: "auto-inc", DataKey: keyName, Scope: finch.SCOPE_STATEMENT}, nil)
+	g, _ := data.NewAutoInc(nil)
 	r := finch.RunLevel{
 		Client: 1,
 		Trx:    1,

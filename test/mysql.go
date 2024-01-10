@@ -38,3 +38,12 @@ func OneRow(db *sql.DB, query string) (string, error) {
 	err := db.QueryRowContext(context.Background(), query).Scan(&s)
 	return s, err
 }
+
+func Exec(db *sql.DB, queries []string) error {
+	for _, q := range queries {
+		if _, err := db.Exec(q); err != nil {
+			return fmt.Errorf("%s: %s", q, err)
+		}
+	}
+	return nil
+}

@@ -1,8 +1,9 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package finch
 
 import (
+	"database/sql"
 	"fmt"
 	"io"
 	"log"
@@ -35,7 +36,6 @@ type RunLevel struct {
 	ExecGroupName string
 	ClientGroup   uint
 	Client        uint
-	Iter          uint
 	Trx           uint
 	TrxName       string
 	Query         uint64
@@ -58,10 +58,71 @@ const (
 	SCOPE_EXEC_GROUP   = "exec-group"
 	SCOPE_CLIENT_GROUP = "client-group"
 	SCOPE_CLIENT       = "client"
+	SCOPE_ITER         = "iter"
 	SCOPE_TRX          = "trx"
 	SCOPE_STATEMENT    = "statement"
-	SCOPE_VALUE        = "value" // special: INSERT INTO t VALUES (@d), (@d), ...
+	SCOPE_ROW          = "row" // special: INSERT INTO t VALUES (@d), (@d), ...
+	SCOPE_VALUE        = "value"
 )
+
+func (rl RunLevel) array() []uint {
+	return []uint{
+		uint(rl.Query), // 0
+		rl.Trx,         // 1
+		0,              // 2 ITER (data scope)
+		rl.Client,      // 3
+		rl.ClientGroup, // 4
+		rl.ExecGroup,   // 5
+		1,              // 6 WORKLOAD not counted
+		rl.Stage,       // 7 STAGE
+		1,              // 8 GLOBAL
+	}
+}
+
+func (rl RunLevel) GreaterThan(prev RunLevel, s string) bool {
+	switch s {
+	case SCOPE_VALUE:
+		return true // all value scoped @d are unique
+	case SCOPE_ROW:
+		s = SCOPE_STATEMENT // row scoped @d per statement
+	case SCOPE_ITER:
+		s = SCOPE_CLIENT // iter scoped @d per client
+	}
+	n := RunLevelNumber(s)
+	now := rl.array()
+	before := prev.array()
+	for i := n; i < uint(len(now)); i++ {
+		if now[i] > before[i] {
+			return true
+		}
+	}
+	return false
+}
+
+var runlevelNumber = map[string]uint{
+	SCOPE_STATEMENT:    0, // data.STATEMENT | These four must
+	SCOPE_TRX:          1, // data.TRX       | match, else
+	SCOPE_ITER:         2, // data.ITER      | NewScopedGenerator
+	SCOPE_CLIENT:       3, // data.CONN      | needs to be updated
+	SCOPE_CLIENT_GROUP: 4,
+	SCOPE_EXEC_GROUP:   5,
+	SCOPE_WORKLOAD:     6,
+	SCOPE_STAGE:        7,
+	SCOPE_GLOBAL:       8,
+}
+
+func RunLevelNumber(s string) uint {
+	n, ok := runlevelNumber[s]
+	if !ok {
+		panic("invalid run level: " + s)
+	}
+	return n
+}
+
+func RunLevelIsValid(s string) bool {
+	_, ok := runlevelNumber[s]
+	return ok
+}
 
 var (
 	CPUProfile io.Writer // --cpu-profile FILE
@@ -122,16 +183,16 @@ func init() {
 }
 
 const (
-	Ereconnect = 0         // default (set to clear default flags)
-	Eabort     = 1 << iota // stop client
-	Erollback              // execute ROLLBACK if in trx
+	Eabort     = 0         // default (set to clear default flags)
+	Ereconnect = 1 << iota // reconnect, next iter
 	Econtinue              // don't reconnect, continue next iter
 	Esilent                // don't repot error or reconnect
+	Erollback              // execute ROLLBACK if in trx
 )
 
 var MySQLErrorHandling = map[uint16]byte{
 	1046: Eabort,                // no database selected
-	1062: Econtinue,             // duplicate key
+	1062: Eabort,                // duplicate key
 	1064: Eabort,                // You have an error in your SQL syntax
 	1146: Eabort,                // table doesn't exist
 	1205: Erollback | Econtinue, // lock wait timeout; no automatic rollback (innodb_rollback_on_timeout=OFF by default)
@@ -140,3 +201,5 @@ var MySQLErrorHandling = map[uint16]byte{
 	1317: Econtinue,             // query killed (Query execution was interrupted)
 	1836: Erollback | Econtinue, // read-only (Running in read-only mode)
 }
+
+var ModifyDB func(*sql.DB, RunLevel)

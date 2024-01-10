@@ -1,8 +1,10 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package workload_test
 
 import (
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/go-test/deep"
@@ -11,6 +13,7 @@ import (
 	"github.com/square/finch/client"
 	"github.com/square/finch/config"
 	"github.com/square/finch/data"
+	"github.com/square/finch/test/mock"
 	"github.com/square/finch/trx"
 	"github.com/square/finch/workload"
 )
@@ -18,6 +21,22 @@ import (
 var p = map[string]string{}
 
 func TestGroups_SetupOne(t *testing.T) {
+	mockValues := []interface{}{"hello"}
+	g := mock.DataGenerator{
+		FormatFunc: func() (uint, string) {
+			return 1, "%d"
+		},
+		ValuesFunc: func(_ data.RunCount) []interface{} {
+			return mockValues
+		},
+	}
+	gf := mock.DataGeneratorFactory{
+		MakeFunc: func(name, dataKey string, params map[string]string) (data.Generator, error) {
+			return g, nil
+		},
+	}
+	data.Register("mock", gf)
+
 	// Just one SELECT statement in this trx file
 	trxList := []config.Trx{
 		{
@@ -25,7 +44,7 @@ func TestGroups_SetupOne(t *testing.T) {
 			File: "../test/trx/001.sql",
 			Data: map[string]config.Data{
 				"id": {
-					Generator: "auto-inc",
+					Generator: "mock",
 				},
 			},
 		},
@@ -63,7 +82,7 @@ func TestGroups_SetupOne(t *testing.T) {
 
 	eg := []config.ClientGroup{
 		{
-			Name:    "dml1",
+			Group:   "dml1",
 			Clients: "1",
 			Iter:    "",
 			Trx:     []string{"001.sql"},
@@ -109,6 +128,7 @@ func TestGroups_SetupOne(t *testing.T) {
 								Query:     "select c from t where id=%d",
 								ResultSet: true,
 								Inputs:    []string{"@id"},
+								Calls:     []byte{0}, // call Generator.Values
 							},
 						},
 						Data: []client.StatementData{
@@ -150,15 +170,12 @@ func TestGroups_SetupOne(t *testing.T) {
 	if len(gotClients[0][0].Clients[0].Data) != 1 || len(gotClients[0][0].Clients[0].Data[0].Inputs) != 1 {
 		t.Errorf("got %d data generator, expected 1", len(gotClients[0][0].Clients[0].Data))
 	} else {
-		gotId := gotClients[0][0].Clients[0].Data[0].Inputs[0].Id()
-		expectId := data.Id{
-			RunLevel: r,
-			Type:     "auto-inc",
-			DataKey:  "@id",
-			Scope:    "statement",
-			CopyNo:   1,
+		f := gotClients[0][0].Clients[0].Data[0].Inputs[0]
+		if f == nil {
+			t.Fatal("client value func not set")
 		}
-		if diff := deep.Equal(gotId, expectId); diff != nil {
+		gotVals := f(data.RunCount{1, 1, 1, 1})
+		if diff := deep.Equal(gotVals, mockValues); diff != nil {
 			t.Error(diff)
 		}
 	}
@@ -210,7 +227,7 @@ func TestGroups_PartialAlloc(t *testing.T) {
 
 	eg := []config.ClientGroup{
 		{
-			Name:    "dml1",
+			Group:   "dml1",
 			Clients: "1",
 			Trx:     []string{"001.sql"}, // auto-assigned
 		},
@@ -218,5 +235,73 @@ func TestGroups_PartialAlloc(t *testing.T) {
 	if diff := deep.Equal(a.Workload, eg); diff != nil {
 		t.Error(diff)
 		t.Logf("got: %#v", a.Workload)
+	}
+}
+
+func TestGroups_ClientGroups(t *testing.T) {
+	stage, err := config.Load([]string{"../test/run/scope/workload_cg_alloc.yaml"}, nil, "dsn", "db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stage) != 1 {
+		t.Fatalf("loaded %d stages, expected 1", len(stage))
+	}
+
+	if err := os.Chdir("../test/run/scope/"); err != nil {
+		t.Fatal(err)
+	}
+
+	scope := data.NewScope()
+	set, err := trx.Load(stage[0].Trx, scope, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if set == nil {
+		t.Fatal("trx.Load returned nil Set")
+	}
+
+	a := workload.Allocator{
+		Stage:     1,
+		StageName: stage[0].Name,
+		TrxSet:    set,
+		Workload:  stage[0].Workload,
+	}
+	groups, err := a.Groups()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 {
+		t.Errorf("got %d exec groups, expected 1", len(groups))
+	}
+	execGroups, err := a.Clients(groups, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(execGroups) != 1 {
+		t.Fatalf("got %d exec groups, expected 1", len(execGroups))
+	}
+	if len(execGroups[0]) != 2 {
+		t.Fatalf("got %d client group in exec groups, expected 2", len(execGroups[0]))
+	}
+	if len(execGroups[0][0].Clients) != 2 {
+		t.Fatalf("got %d clients in e1/g1, expected 2", len(execGroups[0][0].Clients))
+	}
+	if len(execGroups[0][1].Clients) != 2 {
+		t.Fatalf("got %d clients in e1/g2, expected 2", len(execGroups[0][1].Clients))
+	}
+
+	for i := 0; i < 2; i++ {
+		got := execGroups[0][0].Clients[i].RunLevel.ClientId()
+		expect := fmt.Sprintf("1(test)/e1(__A__)/g1/c%d", i+1)
+		if got != expect {
+			t.Errorf("cg 1/c%d: got %s, expected %s", i, got, expect)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		got := execGroups[0][1].Clients[i].RunLevel.ClientId()
+		expect := fmt.Sprintf("1(test)/e1(__A__)/g2/c%d", i+1)
+		if got != expect {
+			t.Errorf("cg 2/c%d: got %s, expected %s", i, got, expect)
+		}
 	}
 }

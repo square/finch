@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 // Package dbconn provides a Factory that makes *sql.DB connections to MySQL.
 package dbconn
@@ -38,6 +38,7 @@ type factory struct {
 
 func SetConfig(cfg config.MySQL) {
 	f.cfg = cfg
+	f.dsn = ""
 }
 
 func Make() (*sql.DB, string, error) {

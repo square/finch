@@ -1,0 +1,9 @@
+# https://bugs.mysql.com/bug.php?id=97001
+# https://blog.jcole.us/2019/09/30/reconsidering-access-paths-for-index-ordering-a-dangerous-optimization-and-a-fix/
+# https://hackmysql.com/post/infamous-order-by-limit-query-optimizer-bug/
+
+stage:
+  trx:
+    - file: get-1-row.sql
+  workload:
+    - iter: 1000

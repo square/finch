@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package data
 
@@ -16,7 +16,6 @@ import (
 
 // Int implements the int data generator.
 type Int struct {
-	id     Id `deep:"-"`
 	min    int64
 	max    int64
 	dist   byte    // normal|uniform
@@ -31,9 +30,8 @@ const (
 	dist_normal
 )
 
-func NewInt(id Id, params map[string]string) (*Int, error) {
+func NewInt(params map[string]string) (*Int, error) {
 	g := &Int{
-		id:   id,
 		min:  1,
 		max:  finch.ROWS,
 		dist: dist_uniform,
@@ -73,17 +71,16 @@ func NewInt(id Id, params map[string]string) (*Int, error) {
 	default:
 		g.dist = dist_uniform
 	}
-	finch.Debug("%s: rand int [%d, %d] dist %d (uni %d, norm %d)", id, g.min, g.max, g.dist, dist_uniform, dist_normal)
+	finch.Debug("rand int [%d, %d] dist %d (uni %d, norm %d)", g.min, g.max, g.dist, dist_uniform, dist_normal)
 	return g, nil
 }
 
-func (g *Int) Id() Id                     { return g.id }
-func (g *Int) Format() string             { return "%d" }
+func (g *Int) Name() string               { return "int" }
+func (g *Int) Format() (uint, string)     { return 1, "%d" }
 func (g *Int) Scan(any interface{}) error { return nil }
 
-func (g *Int) Copy(r finch.RunLevel) Generator {
+func (g *Int) Copy() Generator {
 	c := *g
-	c.id = g.id.Copy(r)
 	return &c
 }
 
@@ -111,7 +108,6 @@ func (g *Int) Values(_ RunCount) []interface{} {
 
 // IntGaps implements the int-gaps data generator.
 type IntGaps struct {
-	id           Id
 	params       map[string]string
 	input_max    int64
 	output_start float64
@@ -120,7 +116,7 @@ type IntGaps struct {
 
 var _ Generator = &IntGaps{}
 
-func NewIntGaps(id Id, params map[string]string) (*IntGaps, error) {
+func NewIntGaps(params map[string]string) (*IntGaps, error) {
 	// https://stackoverflow.com/questions/5731863/mapping-a-numeric-range-onto-another
 	min := int64(1)
 	if err := int64From(params, "min", &min, false); err != nil {
@@ -145,22 +141,21 @@ func NewIntGaps(id Id, params map[string]string) (*IntGaps, error) {
 	input_max := int64(float64(size) * (float64(p) / 100.0))
 
 	g := &IntGaps{
-		id:           id,
 		params:       params,
 		input_max:    input_max,
 		output_start: float64(min),
 		slope:        float64(max-min) / float64(input_max-1),
 	}
-	finch.Debug("%s: 1..%d -> %d..%d (%d%% of %d) gap: %d records", id, input_max, min, max, p, size, int(g.slope))
+	finch.Debug("1..%d -> %d..%d (%d%% of %d) gap: %d records", input_max, min, max, p, size, int(g.slope))
 	return g, nil
 }
 
-func (g *IntGaps) Id() Id                     { return g.id }
-func (g *IntGaps) Format() string             { return "%d" }
+func (g *IntGaps) Name() string               { return "int-gaps" }
+func (g *IntGaps) Format() (uint, string)     { return 1, "%d" }
 func (g *IntGaps) Scan(any interface{}) error { return nil }
 
-func (g *IntGaps) Copy(r finch.RunLevel) Generator {
-	c, _ := NewIntGaps(g.id.Copy(r), g.params)
+func (g *IntGaps) Copy() Generator {
+	c, _ := NewIntGaps(g.params)
 	return c
 }
 
@@ -172,7 +167,6 @@ func (g *IntGaps) Values(_ RunCount) []interface{} {
 
 // IntRange implements the int-range data generator.
 type IntRange struct {
-	id     Id
 	params map[string]string
 	size   int64
 	min    int64
@@ -182,9 +176,8 @@ type IntRange struct {
 
 var _ Generator = &IntRange{}
 
-func NewIntRange(id Id, params map[string]string) (*IntRange, error) {
+func NewIntRange(params map[string]string) (*IntRange, error) {
 	g := &IntRange{
-		id:     id,
 		min:    1,
 		max:    finch.ROWS,
 		size:   100,
@@ -209,12 +202,12 @@ func NewIntRange(id Id, params map[string]string) (*IntRange, error) {
 	return g, nil
 }
 
-func (g *IntRange) Id() Id                     { return g.id }
-func (g *IntRange) Format() string             { return "%d" }
+func (g *IntRange) Name() string               { return "int-range" }
+func (g *IntRange) Format() (uint, string)     { return 2, "%d" }
 func (g *IntRange) Scan(any interface{}) error { return nil }
 
-func (g *IntRange) Copy(r finch.RunLevel) Generator {
-	gCopy, _ := NewIntRange(g.id.Copy(r), g.params)
+func (g *IntRange) Copy() Generator {
+	gCopy, _ := NewIntRange(g.params)
 	return gCopy
 }
 
@@ -234,7 +227,6 @@ func (g *IntRange) Values(_ RunCount) []interface{} {
 
 // IntRangeSeq implements the int-range-seq data generator.
 type IntRangeSeq struct {
-	id     Id
 	begin  int64
 	end    int64
 	size   int64
@@ -245,9 +237,8 @@ type IntRangeSeq struct {
 
 var _ Generator = &IntRangeSeq{}
 
-func NewIntRangeSeq(id Id, params map[string]string) (*IntRangeSeq, error) {
+func NewIntRangeSeq(params map[string]string) (*IntRangeSeq, error) {
 	g := &IntRangeSeq{
-		id:     id,
 		begin:  1,
 		end:    finch.ROWS,
 		size:   100,
@@ -274,12 +265,12 @@ func NewIntRangeSeq(id Id, params map[string]string) (*IntRangeSeq, error) {
 	return g, nil
 }
 
-func (g *IntRangeSeq) Id() Id                     { return g.id }
-func (g *IntRangeSeq) Format() string             { return "%d" }
+func (g *IntRangeSeq) Name() string               { return "int-range-seq" }
+func (g *IntRangeSeq) Format() (uint, string)     { return 2, "%d" }
 func (g *IntRangeSeq) Scan(any interface{}) error { return nil }
 
-func (g *IntRangeSeq) Copy(r finch.RunLevel) Generator {
-	c, _ := NewIntRangeSeq(g.id.Copy(r), g.params)
+func (g *IntRangeSeq) Copy() Generator {
+	c, _ := NewIntRangeSeq(g.params)
 	return c
 }
 
@@ -303,14 +294,12 @@ func (g *IntRangeSeq) Values(_ RunCount) []interface{} {
 type AutoInc struct {
 	i    uint64
 	step uint64
-	id   Id
 }
 
 var _ Generator = &AutoInc{}
 
-func NewAutoInc(id Id, params map[string]string) (*AutoInc, error) {
+func NewAutoInc(params map[string]string) (*AutoInc, error) {
 	g := &AutoInc{
-		id:   id,
 		i:    0,
 		step: 1,
 	}
@@ -333,13 +322,12 @@ func NewAutoInc(id Id, params map[string]string) (*AutoInc, error) {
 	return g, nil
 }
 
-func (g *AutoInc) Id() Id                     { return g.id }
-func (g *AutoInc) Format() string             { return "%d" }
+func (g *AutoInc) Name() string               { return "auto-inc" }
+func (g *AutoInc) Format() (uint, string)     { return 1, "%d" }
 func (g *AutoInc) Scan(any interface{}) error { return nil }
 
-func (g *AutoInc) Copy(r finch.RunLevel) Generator {
+func (g *AutoInc) Copy() Generator {
 	return &AutoInc{
-		id:   g.id.Copy(r),
 		i:    g.i,
 		step: g.step,
 	}

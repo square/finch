@@ -1,3 +1,4 @@
+# https://square.github.io/finch/benchmark/examples/#xfer
 
 params:
   customers: 1,000,000 # + 3 balances per customer (4M rows total)

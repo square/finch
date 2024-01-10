@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package trx_test
 
@@ -44,6 +44,7 @@ func TestLoad_001(t *testing.T) {
 					Query:     "select c from t where id=%d",
 					Inputs:    []string{"@id"},
 					ResultSet: true,
+					Calls:     []byte{0},
 				},
 			},
 		},
@@ -55,6 +56,7 @@ func TestLoad_001(t *testing.T) {
 					Line:      1,
 					Statement: 1,
 					Column:    -1,
+					Scope:     finch.SCOPE_STATEMENT,
 				},
 			},
 			CopiedAt: map[string]finch.RunLevel{},
@@ -101,6 +103,7 @@ func TestLoad_002(t *testing.T) {
 					Query:     "SELECT c FROM t WHERE id BETWEEN %d AND %d",
 					Inputs:    []string{"@d", "@PREV"},
 					ResultSet: true,
+					Calls:     []byte{0, 0},
 				},
 			},
 		},
@@ -112,6 +115,7 @@ func TestLoad_002(t *testing.T) {
 					Line:      2,
 					Statement: 1,
 					Column:    -1,
+					Scope:     finch.SCOPE_STATEMENT,
 				},
 				// No key for @PREV, but it is in Inputs ^
 			},
@@ -161,6 +165,7 @@ func TestLoad_003(t *testing.T) {
 					Inputs:    nil,
 					Outputs:   []string{"@c"},
 					ResultSet: true,
+					// no Calls because this is an output column
 				},
 				{
 					Trx:     "003.sql",
@@ -168,6 +173,7 @@ func TestLoad_003(t *testing.T) {
 					Inputs:  []string{"@c"},
 					Outputs: nil,
 					Write:   true,
+					Calls:   []byte{0},
 				},
 			},
 		},
@@ -179,6 +185,7 @@ func TestLoad_003(t *testing.T) {
 					Line:      4,
 					Statement: 1,
 					Column:    0,
+					Scope:     "",
 				},
 			},
 			CopiedAt: map[string]finch.RunLevel{},
@@ -209,6 +216,7 @@ func TestLoad_copy3(t *testing.T) {
 					ResultSet:    true,
 					Prepare:      true,
 					PrepareMulti: 3,
+					Calls:        []byte{0},
 				},
 				{
 					Trx:          "copy3",
@@ -217,6 +225,7 @@ func TestLoad_copy3(t *testing.T) {
 					ResultSet:    true,
 					Prepare:      true,
 					PrepareMulti: 0,
+					Calls:        []byte{0},
 				},
 
 				{
@@ -226,6 +235,7 @@ func TestLoad_copy3(t *testing.T) {
 					ResultSet:    true,
 					Prepare:      true,
 					PrepareMulti: 0,
+					Calls:        []byte{0},
 				},
 			},
 		},
@@ -237,6 +247,7 @@ func TestLoad_copy3(t *testing.T) {
 					Line:      4,
 					Statement: 1,
 					Column:    -1,
+					Scope:     finch.SCOPE_TRX,
 				},
 			},
 			CopiedAt: map[string]finch.RunLevel{},
@@ -314,7 +325,7 @@ func TestLoad_COPY_NUMBER(t *testing.T) {
 			},
 		},
 		Data: &data.Scope{
-			Keys:     map[string]data.Key{},
+			Keys:     map[string]data.Key{}, // no @d
 			CopiedAt: map[string]finch.RunLevel{},
 		},
 		Meta: map[string]trx.Meta{
@@ -343,5 +354,119 @@ func TestLoad_COPY_NUMBER(t *testing.T) {
 	if diff := deep.Equal(got, expect); diff != nil {
 		t.Error(diff)
 		t.Logf("got: %#v", got)
+	}
+}
+
+func TestLoad_RowScopeCSV(t *testing.T) {
+	file := "rowscope-csv.sql"
+	trxList := []config.Trx{
+		{
+			Name: file, // must set because we don't call Validate
+			File: "../test/trx/" + file,
+			Data: map[string]config.Data{
+				"d": {
+					Generator: "auto-inc",
+				},
+			},
+		},
+	}
+
+	scope := data.NewScope()
+	got, err := trx.Load(trxList, scope, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expect := &trx.Set{
+		Order: []string{file},
+		Statements: map[string][]*trx.Statement{
+			file: []*trx.Statement{
+				{
+					Trx:       file,
+					Query:     "SELECT 1 -- (%d, %d %% 1000, '%d', '%d'), (%d, %d %% 1000, '%d', '%d')",
+					Inputs:    []string{"@d", "@d", "@d", "@d", "@d", "@d", "@d", "@d"},
+					Calls:     []byte{1, 0, 0, 0, 1, 0, 0, 0},
+					ResultSet: true,
+				},
+
+				{
+					Trx:       file,
+					Query:     "SELECT 1 -- (%d, %d %% 1000, '%d', '%d'), (%d, %d %% 1000, '%d', '%d')",
+					Inputs:    []string{"@d", "@d", "@d", "@d", "@d", "@d", "@d", "@d"},
+					Calls:     []byte{1, 0, 0, 0, 1, 0, 0, 0},
+					ResultSet: true,
+				},
+			},
+		},
+		Data: &data.Scope{
+			Keys: map[string]data.Key{
+				"@d": data.Key{
+					Name:      "@d",
+					Trx:       file,
+					Line:      1,
+					Statement: 1,
+					Column:    -1,
+					Scope:     finch.SCOPE_ROW,
+				},
+			},
+			CopiedAt: map[string]finch.RunLevel{},
+		},
+		Meta: map[string]trx.Meta{
+			file: {},
+		},
+	}
+
+	if diff := deep.Equal(got, expect); diff != nil {
+		t.Error(diff)
+		t.Logf("got: %#v", got)
+	}
+}
+
+func TestCalls(t *testing.T) {
+	type test struct {
+		inputs []string
+		expect []byte
+	}
+	callTests := []test{
+		{[]string{"@d"}, []byte{0}},
+		{[]string{"@d", "@d"}, []byte{0, 0}},
+		{[]string{"@d()"}, []byte{1}},
+		{[]string{"@d()", "@d"}, []byte{1, 0}},
+		{[]string{"@d", "@x", "@d()"}, []byte{0, 0, 1}},
+		{[]string{"@d()", "@d()", "@d()"}, []byte{1, 1, 1}},
+	}
+	for _, c := range callTests {
+		got := trx.Calls(c.inputs)
+		if diff := deep.Equal(got, c.expect); diff != nil {
+			t.Logf("%s -> %v", c.inputs, got)
+			t.Error(diff)
+		}
+	}
+}
+
+func TestRowScope(t *testing.T) {
+	s := map[string]bool{
+		"@d": true,
+		"@x": true,
+	}
+	type test struct {
+		keys   map[string]bool
+		in     string
+		expect string
+	}
+	callTests := []test{
+		{s, "(@d)", "(@d())"},
+		{s, "(@d())", "(@d())"},
+		{s, "(@d(), @d)", "(@d(), @d)"},
+		{s, "(@d, @d)", "(@d(), @d)"},
+		{s, "(@d, @x, @d)", "(@d(), @x(), @d)"},
+		{s, "(@d, @x(), @d)", "(@d(), @x(), @d)"},
+	}
+	for _, c := range callTests {
+		got := trx.RowScope(c.keys, c.in)
+		if diff := deep.Equal(got, c.expect); diff != nil {
+			t.Error(diff)
+			t.Logf("%s -> %v", c.in, got)
+		}
 	}
 }

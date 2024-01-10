@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package data_test
 
@@ -14,7 +14,7 @@ import (
 
 func TestInteger_Int(t *testing.T) {
 	finch.Debugging = true
-	g, _ := data.NewInt(data.Id{}, map[string]string{
+	g, _ := data.NewInt(map[string]string{
 		"max": "1000",
 	})
 	r := data.RunCount{}
@@ -39,7 +39,7 @@ func TestInteger_Int(t *testing.T) {
 
 	// Copy should be identical except Id
 	deep.CompareUnexportedFields = true
-	c := g.Copy(finch.RunLevel{Query: 2})
+	c := g.Copy()
 	if diff := deep.Equal(g, c); diff != nil {
 		t.Error(diff)
 	}
@@ -47,7 +47,7 @@ func TestInteger_Int(t *testing.T) {
 }
 
 func TestInteger_AutoInc(t *testing.T) {
-	g, _ := data.NewAutoInc(data.Id{}, nil)
+	g, _ := data.NewAutoInc(nil)
 	r := data.RunCount{}
 
 	for i := 1; i <= 3; i++ { // 1, 2, 3
@@ -62,7 +62,7 @@ func TestInteger_AutoInc(t *testing.T) {
 	}
 
 	// start=5: first value is 5+1 (6), then 6+1 (7)
-	g, _ = data.NewAutoInc(data.Id{}, map[string]string{"start": "5"})
+	g, _ = data.NewAutoInc(map[string]string{"start": "5"})
 	for i := 6; i <= 7; i++ { // 6, 7
 		v1 := g.Values(r)
 		if len(v1) != 1 {
@@ -75,7 +75,7 @@ func TestInteger_AutoInc(t *testing.T) {
 	}
 
 	// step=2
-	g, _ = data.NewAutoInc(data.Id{}, map[string]string{"step": "2"})
+	g, _ = data.NewAutoInc(map[string]string{"step": "2"})
 	for i := 1; i <= 2; i++ { // 2, 4
 		v1 := g.Values(r)
 		if len(v1) != 1 {
@@ -88,7 +88,7 @@ func TestInteger_AutoInc(t *testing.T) {
 	}
 
 	// start=10 step=2
-	g, _ = data.NewAutoInc(data.Id{}, map[string]string{"start": "10", "step": "2"})
+	g, _ = data.NewAutoInc(map[string]string{"start": "10", "step": "2"})
 	for _, i := range []uint64{12, 14} {
 		v1 := g.Values(r)
 		if len(v1) != 1 {
@@ -103,7 +103,7 @@ func TestInteger_AutoInc(t *testing.T) {
 
 func TestInteger_IntRange(t *testing.T) {
 	// Default is [1, 100000] with size 100
-	g, _ := data.NewIntRange(data.Id{}, map[string]string{})
+	g, _ := data.NewIntRange(map[string]string{})
 	r := data.RunCount{}
 
 	got := [][]int64{}
@@ -131,7 +131,7 @@ func TestInteger_IntRange(t *testing.T) {
 }
 
 func TestInteger_IntRangeSeq(t *testing.T) {
-	g, _ := data.NewIntRangeSeq(data.Id{}, map[string]string{
+	g, _ := data.NewIntRangeSeq(map[string]string{
 		"begin": "1",
 		"end":   "9",
 		"size":  "3",
@@ -158,7 +158,7 @@ func TestInteger_IntRangeSeq(t *testing.T) {
 	}
 
 	// Short chunk at end
-	g, _ = data.NewIntRangeSeq(data.Id{}, map[string]string{
+	g, _ = data.NewIntRangeSeq(map[string]string{
 		"begin": "1",
 		"end":   "9",
 		"size":  "4",
@@ -184,7 +184,7 @@ func TestInteger_IntRangeSeq(t *testing.T) {
 }
 
 func TestInteger_IntGaps(t *testing.T) {
-	g, err := data.NewIntGaps(data.Id{}, map[string]string{
+	g, err := data.NewIntGaps(map[string]string{
 		"min": "1",
 		"max": "100",
 		"p":   "20", // percent

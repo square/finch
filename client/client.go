@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package client
 
@@ -25,13 +25,18 @@ var (
 	ConnectRetryWait = 200 * time.Millisecond
 )
 
-// Client executes SQL statements.
+// Client executes SQL statements. Each client is created in workload.Allocator.Clients
+// and run in Stage.Run. Client.Init must be called once before calling Client.Run once.
 type Client struct {
-	RunLevel         finch.RunLevel
-	Statements       []*trx.Statement
-	Data             []StatementData
-	Stats            []*stats.Trx `deep:"-"`
-	DB               *sql.DB      `deep:"-"`
+	// Required args
+	DB         *sql.DB `deep:"-"`
+	Data       []StatementData
+	DoneChan   chan *Client
+	RunLevel   finch.RunLevel
+	Statements []*trx.Statement
+	Stats      []*stats.Trx `deep:"-"`
+
+	// Optional, usually from stage config
 	DefaultDb        string
 	IterExecGroup    uint32
 	IterExecGroupPtr *uint32
@@ -40,8 +45,10 @@ type Client struct {
 	Iter             uint
 	QPS              <-chan bool
 	TPS              <-chan bool
-	DoneChan         chan *Client
-	Error            Error
+
+	// Retrun value to DoneChane
+	Error Error
+
 	// --
 	ps     []*sql.Stmt
 	values [][]interface{}
@@ -54,7 +61,7 @@ type Error struct {
 }
 
 type StatementData struct {
-	Inputs      []data.Generator `deep:"-"` // input to query
+	Inputs      []data.ValueFunc `deep:"-"` // input to query
 	Outputs     []interface{}    `deep:"-"` // output from query; values are data.Generator
 	InsertId    data.Generator   `deep:"-"`
 	TrxBoundary byte
@@ -77,6 +84,9 @@ func (c *Client) Connect(ctx context.Context, cerr error, stmtNo int, trxActive 
 		return ctx.Err()
 	}
 
+	// @todo: handled errors aren't printed, can't tell what went wrong
+	//        when errors col != 0
+
 	silent := false
 	// Connect called due to error on query execution?
 	if cerr != nil {
@@ -91,7 +101,7 @@ func (c *Client) Connect(ctx context.Context, cerr error, stmtNo int, trxActive 
 			if errFlags&finch.Erollback != 0 && trxActive {
 				finch.Debug("%s: rollback", c.RunLevel.ClientId())
 				if _, err := c.conn.ExecContext(ctx, "ROLLBACK"); err != nil {
-					return fmt.Errorf("ROLLBACK failed: %s (on err: %s) (query: %s)", c.RunLevel.ClientId(), err, cerr, c.Statements[stmtNo].Query)
+					return fmt.Errorf("ROLLBACK failed: %s (on err: %s) (query: %s)", err, cerr, c.Statements[stmtNo].Query)
 				}
 			}
 			if errFlags&finch.Econtinue != 0 {
@@ -189,11 +199,18 @@ func (c *Client) Run(ctxExec context.Context) {
 		return
 	}
 
+	var rc data.RunCount
+	rc[data.CONN] = 1 // first MySQL connection ^
+
+	// Not counts but passed with RunCount in case a data.Generator wants to know
+	rc[data.CLIENT] = c.RunLevel.Client
+	rc[data.CLIENT_GROUP] = c.RunLevel.ClientGroup
+	rc[data.EXEC_GROUP] = c.RunLevel.ExecGroup
+	rc[data.STAGE] = c.RunLevel.Stage
+
 	var rows *sql.Rows
 	var res sql.Result
 	var t time.Time
-
-	rc := data.RunCount{}
 
 	// trxNo indexes into c.Stats and resets to 0 on each iteration. Remember:
 	// these are finch trx (files), not MySQL trx, so trx boundaries mark the
@@ -238,15 +255,6 @@ ITER:
 				trxActive = false
 			}
 
-			// Generate new data values for this query. A single data generator
-			// can return multiple values, so d makes copy() append, else copy()
-			// would start at [0:] each time
-			rc[data.STATEMENT] += 1
-			d := 0
-			for _, g := range c.Data[i].Inputs {
-				d += copy(c.values[i][d:], g.Values(rc))
-			}
-
 			// If BEGIN, check TPS rate limiter
 			if c.TPS != nil && c.Statements[i].Begin {
 				<-c.TPS
@@ -255,6 +263,15 @@ ITER:
 			// If query, check QPS
 			if c.QPS != nil {
 				<-c.QPS
+			}
+
+			// Generate new data values for this query. A single data generator
+			// can return multiple values, so d makes copy() append, else copy()
+			// would start at [0:] each time
+			rc[data.STATEMENT] += 1
+			d := 0
+			for _, f := range c.Data[i].Inputs {
+				d += copy(c.values[i][d:], f(rc))
 			}
 
 			if c.Statements[i].ResultSet {
@@ -335,8 +352,8 @@ ITER:
 				c.Error.StatementNo = i
 				return // unrecoverable error or runtime elapsed (context timeout/cancel)
 			}
-			continue ITER // restart after recoverable error (e.g. deadlock, lock timeout)
-
+			rc[data.CONN] += 1 // reconnected or recovered after query error
+			continue ITER
 		} // statements
 	} // iterations
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package data_test
 
@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/square/finch"
 	"github.com/square/finch/data"
 )
 
@@ -14,11 +13,6 @@ func TestString_StrFillAz(t *testing.T) {
 	lens := []string{"1", "10", "100", "1000", "10000", "100000", "1000000"}
 	for _, strlen := range lens {
 		g, _ := data.NewStrFillAz(
-			data.Id{
-				Scope:   finch.SCOPE_STATEMENT,
-				Type:    "str-az",
-				DataKey: "@d",
-			},
 			map[string]string{
 				"len": strlen,
 			},
