@@ -317,7 +317,6 @@ type Data struct {
 	Name      string            `yaml:"name"`      // @id
 	Generator string            `yaml:"generator"` // data.Generator type
 	Scope     string            `yaml:"scope"`
-	Copies    uint              `yaml:"copies"`
 	Params    map[string]string `yaml:"params"` // Generator-specific params
 }
 
@@ -335,7 +334,6 @@ func (c *Data) Vars(params map[string]string) error {
 	if err != nil {
 		return err
 	}
-	// @todo: Vars(Copies)
 	for k, v := range c.Params {
 		c.Params[k], err = Vars(v, params, true)
 		if err != nil {
