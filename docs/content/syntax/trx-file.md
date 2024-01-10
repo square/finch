@@ -1,5 +1,5 @@
 ---
-weight: 1
+weight: 2
 ---
 
 Trx files are plain text format with blank lines separating SQL statements.

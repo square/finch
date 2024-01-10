@@ -1,5 +1,5 @@
 ---
-weight: 2
+weight: 1
 ---
 
 Stage files are YAML format.
