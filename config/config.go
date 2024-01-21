@@ -35,7 +35,7 @@ type stageFile struct {
 
 func Load(stageFiles []string, kvparams []string, dsn, db string) ([]Stage, error) {
 	var err error
-	base := map[string]*Base{}
+	base := map[string]Base{}
 	stages := []Stage{}
 
 	// Get and restore current working dir because we chdir to validate stage stageFiles
@@ -74,14 +74,25 @@ func Load(stageFiles []string, kvparams []string, dsn, db string) ([]Stage, erro
 					if err := yaml.UnmarshalStrict(bytes, &newb); err != nil {
 						return nil, fmt.Errorf("cannot decode YAML in %s: %s", fileName, err)
 					}
-					base[dir] = &newb
-					b = &newb
-					finch.Debug("base: %+v", *b)
+					base[dir] = newb
+					b = newb
+					finch.Debug("base: %+v", b)
 				}
 			} else {
-				base[dir] = nil
 				finch.Debug("base: none in %s", dir)
 			}
+
+			// --param foo=bar on command line overrides .params in stage files
+			if len(b.Params) > 0 {
+				if b.Params == nil {
+					b.Params = map[string]string{}
+				}
+				for k, v := range params {
+					b.Params[k] = v
+				}
+			}
+
+			base[dir] = b
 		}
 
 		// Load stage file, which includes and overwrite the optional base config (b)
@@ -100,19 +111,15 @@ func Load(stageFiles []string, kvparams []string, dsn, db string) ([]Stage, erro
 		if err := yaml.UnmarshalStrict(bytes, f); err != nil {
 			return nil, fmt.Errorf("cannot decode YAML in %s: %s", fileName, err)
 		}
-		if b != nil {
-			f.Stage.With(b)
-		}
 
-		// --param foo=bar on command line overrides .params in stage files
-		for k, v := range params {
-			f.Stage.Params[k] = v
-		}
+		// Set stage with defaults (base)
+		f.Stage.With(b)
 
 		// --dsn and --database on command line override config files
 		if dsn != "" {
 			f.Stage.MySQL.DSN = dsn
-		} else if db != "" {
+		}
+		if db != "" {
 			f.Stage.MySQL.Db = db
 		}
 
