@@ -50,7 +50,7 @@ type Stage struct {
 	Workload []ClientGroup     `yaml:"workload,omitempty"`
 }
 
-func (c *Stage) With(b *Base) {
+func (c *Stage) With(b Base) {
 	// Apply base config to stage before reading stage config file. This means
 	// any base config values are overwritten if set in the stage config file.
 	if len(b.Params) > 0 {
@@ -66,10 +66,19 @@ func (c *Stage) With(b *Base) {
 
 	// Shallow copy MySQL because it has no maps or slices, but setBool to create
 	// new *bool pointers
-	c.MySQL = b.MySQL
-	c.MySQL.DisableAutoTLS = setBool(c.MySQL.DisableAutoTLS, b.MySQL.DisableAutoTLS)
-	c.MySQL.TLS.SkipVerify = setBool(c.MySQL.TLS.SkipVerify, b.MySQL.TLS.SkipVerify)
-	c.MySQL.TLS.Disable = setBool(c.MySQL.TLS.Disable, b.MySQL.TLS.Disable)
+	c.MySQL.With(b.MySQL)
+	/*
+		c.MySQL = b.MySQL
+		c.MySQL.DisableAutoTLS = setBool(c.MySQL.DisableAutoTLS, b.MySQL.DisableAutoTLS)
+		c.MySQL.TLS.SkipVerify = setBool(c.MySQL.TLS.SkipVerify, b.MySQL.TLS.SkipVerify)
+		c.MySQL.TLS.Disable = setBool(c.MySQL.TLS.Disable, b.MySQL.TLS.Disable)
+
+		if b.MySQL.Db != "" {
+			for i := range c.Workload {
+				c.Workload[i].Db = b.MySQL.Db
+			}
+		}
+	*/
 
 	// Stats has a map, so copy in all fields manually
 	c.Stats.Disable = setBool(c.Stats.Disable, b.Stats.Disable)
@@ -83,6 +92,7 @@ func (c *Stage) With(b *Base) {
 			}
 		}
 	}
+
 }
 
 func (c *Stage) Vars() error {
