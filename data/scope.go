@@ -165,22 +165,22 @@ func NewScopedGenerator(id Id, g Generator) *ScopedGenerator {
 		g:  g, // real Generator
 	}
 
-	switch id.Scope {
-	// Single client scopes (most common)
-	case finch.SCOPE_STATEMENT, finch.SCOPE_TRX, finch.SCOPE_ITER, finch.SCOPE_CLIENT:
+	n := finch.RunLevelNumber(id.Scope)
+	if id.Scope == finch.SCOPE_VALUE {
+		// No special handling
+	} else if n <= finch.RunLevelNumber(finch.SCOPE_CLIENT) {
+		// Single client scopes (most common)
 		s.singleClient = true
-		s.sno = byte(finch.RunLevelNumber(id.Scope)) // these match, see finch.runlevelNumber comment
-	// Multi client scopes: iter = each <client, iter>
-	case finch.SCOPE_CLIENT_GROUP, finch.SCOPE_EXEC_GROUP, finch.SCOPE_WORKLOAD:
+		s.sno = byte(n) // these match, see finch.runlevelNumber comment
+	} else if n <= finch.RunLevelNumber(finch.SCOPE_WORKLOAD) {
+		// Multi client scopes: iter = each <client, iter>
 		s.cgMux = &sync.RWMutex{}
 		s.cgIter = map[uint]uint{}
 		s.cgVals = map[uint][]interface{}{}
-	// One time scopes
-	case finch.SCOPE_STAGE, finch.SCOPE_GLOBAL:
+	} else if n <= finch.RunLevelNumber(finch.SCOPE_GLOBAL) {
+		// One time scopes
 		s.oneTime = true
-	case finch.SCOPE_VALUE:
-		// Nothing to set
-	default:
+	} else {
 		panic("invalid scope: " + id.Scope)
 	}
 

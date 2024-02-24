@@ -100,6 +100,8 @@ func (rl RunLevel) GreaterThan(prev RunLevel, s string) bool {
 }
 
 var runlevelNumber = map[string]uint{
+	SCOPE_VALUE:        0,
+	SCOPE_ROW:          0,
 	SCOPE_STATEMENT:    0, // data.STATEMENT | These four must
 	SCOPE_TRX:          1, // data.TRX       | match, else
 	SCOPE_ITER:         2, // data.ITER      | NewScopedGenerator
