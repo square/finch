@@ -116,12 +116,7 @@ func Load(stageFiles []string, kvparams []string, dsn, db string) ([]Stage, erro
 		f.Stage.With(b)
 
 		// --dsn and --database on command line override config files
-		if dsn != "" {
-			f.Stage.MySQL.DSN = dsn
-		}
-		if db != "" {
-			f.Stage.MySQL.Db = db
-		}
+		f.Stage.CommandLine(dsn, db)
 
 		// interpolate $vars -> values (see Vars func below)
 		if err := f.Stage.Vars(); err != nil {

@@ -81,6 +81,29 @@ func (c *Stage) With(b Base) {
 
 }
 
+func (c *Stage) CommandLine(dsn, db string) {
+	if dsn != "" {
+		if c.MySQL.DSN != "" {
+			finch.Debug("--dsn overrides stage.mysql.dsn") // don't print password
+		}
+		c.MySQL.DSN = dsn
+	}
+	if db != "" {
+		if c.MySQL.Db != "" {
+			finch.Debug("--database overrides stage.mysql.db: %s -> %s", c.MySQL.Db, db)
+		} else {
+			finch.Debug("default db: %s", db)
+		}
+		c.MySQL.Db = db
+		for i := range c.Workload {
+			if c.Workload[i].Db != "" {
+				finch.Debug("--database overrides stage.workload[%d].db: %s -> %s", i, c.Workload[i].Db, db)
+			}
+			c.Workload[i].Db = db
+		}
+	}
+}
+
 func (c *Stage) Vars() error {
 	var err error
 
