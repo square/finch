@@ -1,4 +1,4 @@
-// Copyright 2023 Block, Inc.
+// Copyright 2024 Block, Inc.
 
 package stats
 
@@ -18,8 +18,9 @@ import (
 //	stats:
 //	  report:
 //	    stdout:
-//	      each-instance: true
-//	      combined: true
+//	      combined:      true
+//	      each-instance: false
+//	      percentiles:   "P999"
 type Stdout struct {
 	p        []float64
 	w        *tabwriter.Writer
@@ -125,10 +126,10 @@ func (r *Stdout) print(in *Instance) {
 	)
 
 	// Replace P in Fmt with the CSV percentile values
-	line = strings.Replace(line, "P", intsToString(s.Percentiles(TOTAL, r.p), "\\t", true), 1)
-	line = strings.Replace(line, "P", intsToString(s.Percentiles(READ, r.p), "\\t", true), 1)
-	line = strings.Replace(line, "P", intsToString(s.Percentiles(WRITE, r.p), "\\t", true), 1)
-	line = strings.Replace(line, "P", intsToString(s.Percentiles(COMMIT, r.p), "\\t", true), 1)
+	line = strings.Replace(line, "P", intsToString(s.Percentiles(TOTAL, r.p), "\t", true), 1)
+	line = strings.Replace(line, "P", intsToString(s.Percentiles(READ, r.p), "\t", true), 1)
+	line = strings.Replace(line, "P", intsToString(s.Percentiles(WRITE, r.p), "\t", true), 1)
+	line = strings.Replace(line, "P", intsToString(s.Percentiles(COMMIT, r.p), "\t", true), 1)
 
 	fmt.Fprintf(r.w, line)
 }
