@@ -223,11 +223,12 @@ func (c *Stage) Validate() error {
 
 		if c.Workload[i].Group != "" {
 			if last, ok := names[c.Workload[i].Group]; !ok {
-				names[c.Workload[i].Group] = i
+				names[c.Workload[i].Group] = i // new group
 			} else {
-				if last != i-1 {
-					return fmt.Errorf("duplicate or non-consecutive execution group name: %s: first at %s.workload[%d], then at %s.workoad[%d]; unique group names must consecutive", c.Workload[i].Group, c.Name, last, c.Name, i)
+				if c.Workload[i].Group != c.Workload[i-1].Group {
+					return fmt.Errorf("duplicate execution group name: '%s': last used at %s.workload[%d], duplicate at %s.workload[%d]: unique group names must consecutive like 'aabb', not 'aaba' (last 'a' is duplicate)", c.Workload[i].Group, c.Name, last, c.Name, i)
 				}
+				names[c.Workload[i].Group] = i
 			}
 		}
 
